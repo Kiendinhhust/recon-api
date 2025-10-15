@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recon API - Subdomain Scanner Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <h1 class="logo">🔍 Recon WEB-KD</h1>
+            <p class="tagline">Subdomain Reconnaissance Dashboard</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container">
+
+            <!-- Action Buttons -->
+            <section class="section">
+                <div class="action-buttons">
+                    <button class="btn btn-primary btn-large" onclick="showNewScanModal()">
+                        <span class="btn-icon">➕</span> New Scan
+                    </button>
+                    <button class="btn btn-secondary btn-large" onclick="showBulkScanModal()">
+                        <span class="btn-icon">📋</span> Bulk Scan
+                    </button>
+                </div>
+            </section>
+
+            <!-- Scan List Section -->
+            <section class="section">
+                <div class="section-header">
+                    <h2>📋 Recent Scans</h2>
+                    <button class="btn btn-primary" onclick="loadScans()">
+                        <span class="btn-icon">🔄</span> Refresh
+                    </button>
+                </div>
+                
+                <div id="scans-list" class="scans-grid">
+                    <div class="loading">Loading scans...</div>
+                </div>
+            </section>
+
+            <!-- Scan Details Section -->
+            <section class="section" id="scan-details-section" style="display: none;">
+                <div class="section-header">
+                    <h2>📊 Scan Details</h2>
+                    <button class="btn btn-secondary" onclick="closeScanDetails()">
+                        <span class="btn-icon">✖</span> Close
+                    </button>
+                </div>
+
+                <!-- Scan Info -->
+                <div class="scan-info-card">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Domain:</span>
+                            <span class="info-value" id="detail-domain">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Status:</span>
+                            <span class="info-value" id="detail-status">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Subdomains:</span>
+                            <span class="info-value" id="detail-subdomains-count">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Screenshots:</span>
+                            <span class="info-value" id="detail-screenshots-count">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Created:</span>
+                            <span class="info-value" id="detail-created">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Completed:</span>
+                            <span class="info-value" id="detail-completed">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search/Filter -->
+                <div class="search-box">
+                    <input type="text" id="subdomain-search" placeholder="🔍 Search subdomains..." onkeyup="filterSubdomains()">
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+                        <button class="filter-btn" data-filter="live" onclick="setFilter('live')">Live</button>
+                        <button class="filter-btn" data-filter="dead" onclick="setFilter('dead')">Dead</button>
+                    </div>
+                </div>
+
+                <!-- Subdomains Table -->
+                <div class="table-container">
+                    <table class="subdomains-table">
+                        <thead>
+                            <tr>
+                                <th>Subdomain</th>
+                                <th>Status</th>
+                                <th>HTTP Code</th>
+                                <th>Response Time</th>
+                                <th>Discovered By</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subdomains-tbody">
+                            <tr>
+                                <td colspan="5" class="loading">Loading subdomains...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Screenshots Gallery -->
+                <div class="screenshots-section">
+                    <h3>📸 Screenshots</h3>
+                    <div id="screenshots-gallery" class="screenshots-grid">
+                        <div class="loading">Loading screenshots...</div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 Recon API - Powered by FastAPI & Celery</p>
+        </div>
+    </footer>
+
+    <!-- New Scan Modal -->
+    <div id="newScanModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>➕ New Scan</h2>
+                <button class="modal-close" onclick="closeNewScanModal()">✖</button>
+            </div>
+            <div class="modal-body">
+                <label for="newScanDomain">Domain:</label>
+                <input type="text" id="newScanDomain" placeholder="example.com" class="modal-input">
+                <div id="newScanError" class="error-message"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeNewScanModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitNewScan()">
+                    <span class="btn-icon">🚀</span> Start Scan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Scan Modal -->
+    <div id="bulkScanModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Bulk Scan</h2>
+                <button class="modal-close" onclick="closeBulkScanModal()">✖</button>
+            </div>
+            <div class="modal-body">
+                <label for="bulkScanDomains">Domains (one per line):</label>
+                <textarea id="bulkScanDomains" placeholder="example1.com&#10;example2.com&#10;example3.com" class="modal-textarea" rows="10"></textarea>
+                <div id="bulkScanError" class="error-message"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBulkScanModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitBulkScan()">
+                    <span class="btn-icon">🚀</span> Start Bulk Scan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
