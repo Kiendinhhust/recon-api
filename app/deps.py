@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     httprobe_path: str = "httprobe"
     anew_path: str = "anew"
     gowitness_path: str = "gowitness"
+    wafw00f_path: str = "wafw00f"
+    sourceleakhacker_path: str = "SourceLeakHacker.py"
+    python_executable: str = "python"
 
     # Tool timeouts (in seconds)
     subfinder_timeout: int = 600  # 10 minutes
@@ -55,6 +58,13 @@ class Settings(BaseSettings):
     httpx_timeout: int = 900      # 15 minutes
     httprobe_timeout: int = 600   # 10 minutes
     gowitness_timeout: int = 1800 # 30 minutes
+    wafw00f_timeout: int = 900    # 15 minutes
+    sourceleakhacker_timeout: int = 1800  # 30 minutes
+
+    # WAF and Leak detection options
+    enable_sourceleakhacker: bool = False
+    sourceleakhacker_mode: str = "tiny"  # tiny or full
+    sourceleakhacker_threads: int = 8
     
     class Config:
         env_file = ".env"

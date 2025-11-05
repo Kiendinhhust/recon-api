@@ -31,15 +31,26 @@ celery_app.conf.update(
     # Retry configuration
     task_default_retry_delay=60,
     task_max_retries=3,
+    # Broker connection retry on startup (fixes deprecation warning)
+    broker_connection_retry_on_startup=True,
 )
 
-# Enhanced task routing with different queues for different workloads
+# Enhanced task routing with specialized queues for different workloads
+# This allows for dedicated workers to handle specific types of tasks
 celery_app.conf.task_routes = {
+    # Full reconnaissance scans (includes all stages)
     "app.workers.tasks.run_recon_scan": {"queue": "recon_full"},
+
     "app.workers.tasks.run_subdomain_enumeration": {"queue": "recon_enum"},
     "app.workers.tasks.run_live_host_check": {"queue": "recon_check"},
     "app.workers.tasks.run_screenshot_capture": {"queue": "recon_screenshot"},
-    "app.workers.tasks.cleanup_old_jobs": {"queue": "maintenance"},
+
+    # Specialized detection tasks
+    "app.workers.tasks.run_waf_check": {"queue": "waf_check"},
+    "app.workers.tasks.run_sourceleakhacker_check": {"queue": "leak_check"},
+
+    # Maintenance tasks
+     "app.workers.tasks.cleanup_old_jobs": {"queue": "maintenance"},
 }
 
 # Queue priorities (higher number = higher priority)

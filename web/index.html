@@ -94,6 +94,46 @@
                     </div>
                 </div>
 
+                <!-- Manual Subdomain Addition Form -->
+                <div class="manual-subdomain-section">
+                    <button class="toggle-btn" onclick="toggleManualSubdomainForm()">
+                        <span id="manual-subdomain-toggle-icon">▼</span>
+                        <span id="manual-subdomain-toggle-text">Show</span> Manual Subdomain Addition
+                    </button>
+
+                    <div id="manual-subdomain-form" class="collapsible-form" style="display: none;">
+                        <div class="form-group">
+                            <label for="manual-subdomain-input">Subdomain:</label>
+                            <input type="text" id="manual-subdomain-input" placeholder="e.g., admin.example.com or https://admin.example.com" />
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="manual-is-live">Is Live:</label>
+                                <select id="manual-is-live">
+                                    <option value="">Auto-detect</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="manual-http-status">HTTP Status:</label>
+                                <input type="number" id="manual-http-status" placeholder="e.g., 200" min="100" max="599" />
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button id="add-subdomain-btn" class="btn-primary" onclick="addSubdomainManually()">
+                                <span class="btn-icon">➕</span> Add Subdomain
+                            </button>
+                        </div>
+
+                        <div id="manual-subdomain-error" class="error-message"></div>
+                        <div id="manual-subdomain-success" class="success-message"></div>
+                    </div>
+                </div>
+
                 <!-- Subdomains Table -->
                 <div class="table-container">
                     <table class="subdomains-table">
@@ -112,6 +152,143 @@
                             </tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- WAF Detections Table -->
+                <div class="table-container">
+                    <h3>🛡 WAF Detections</h3>
+                    <table class="subdomains-table">
+                        <thead>
+                            <tr>
+                                <th>URL</th>
+                                <th>Protected</th>
+                                <th>WAF Name</th>
+                                <th>Manufacturer</th>
+                            </tr>
+                        </thead>
+                        <tbody id="waf-tbody">
+                            <tr>
+                                <td colspan="4" class="loading">Loading WAF detections...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Leak Findings Table -->
+                <div class="table-container">
+                    <h3>🧩 Leak Findings</h3>
+                    <table class="subdomains-table">
+                        <thead>
+                            <tr>
+                                <th>Base URL</th>
+                                <th>Leaked File URL</th>
+                                <th>HTTP Status</th>
+                                <th>Type</th>
+                                <th>Severity</th>
+                                <th>Size</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaks-tbody">
+                            <tr>
+                                <td colspan="6" class="loading">Loading leak findings...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Selective Leak Scanning Section -->
+                <div class="selective-scan-section" id="selective-scan-section" style="display: none;">
+                    <div class="section-header">
+                        <h3>🎯 Selective Leak Scanning</h3>
+                        <button class="btn btn-secondary btn-small" onclick="toggleSelectiveScanForm()">
+                            <span class="btn-icon" id="selective-scan-toggle-icon">▼</span>
+                            <span id="selective-scan-toggle-text">Show</span>
+                        </button>
+                    </div>
+
+                    <div id="selective-scan-form" style="display: none;">
+                        <!-- URL Selection -->
+                        <div class="selective-scan-form-group">
+                            <label class="form-label">
+                                <strong>Select URLs to Scan:</strong>
+                                <span class="form-hint">(Select from live hosts without WAF protection)</span>
+                            </label>
+
+                            <div class="url-selection-controls">
+                                <button class="btn btn-small btn-secondary" onclick="selectAllUrls()">
+                                    <span class="btn-icon">☑</span> Select All
+                                </button>
+                                <button class="btn btn-small btn-secondary" onclick="deselectAllUrls()">
+                                    <span class="btn-icon">☐</span> Deselect All
+                                </button>
+                                <span class="selected-count" id="selected-urls-count">0 URLs selected</span>
+                            </div>
+
+                            <div class="url-selection-list" id="url-selection-list">
+                                <div class="loading">Loading available URLs...</div>
+                            </div>
+                        </div>
+
+                        <!-- Scan Mode Selection -->
+                        <div class="selective-scan-form-group">
+                            <label class="form-label" for="scan-mode-select">
+                                <strong>Scan Mode:</strong>
+                            </label>
+                            <select id="scan-mode-select" class="form-select">
+                                <option value="tiny">Tiny (Fast - ~100 paths)</option>
+                                <option value="full">Full (Thorough - ~1000 paths)</option>
+                            </select>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div class="selective-scan-form-group">
+                            <button class="btn btn-primary btn-large" onclick="submitSelectiveScan()" id="selective-scan-submit-btn">
+                                <span class="btn-icon">🚀</span> Start Selective Leak Scan
+                            </button>
+                        </div>
+
+                        <!-- Error Message -->
+                        <div id="selective-scan-error" class="error-message"></div>
+                    </div>
+
+                    <!-- Scan Progress -->
+                    <div id="selective-scan-progress" style="display: none;">
+                        <div class="progress-card">
+                            <h4>🔄 Scan in Progress</h4>
+                            <div class="progress-info">
+                                <span id="selective-scan-status">Initializing...</span>
+                                <span id="selective-scan-percentage">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="selective-scan-progress-bar" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-details">
+                                <div><strong>Task ID:</strong> <span id="selective-scan-task-id">-</span></div>
+                                <div><strong>URLs Scanning:</strong> <span id="selective-scan-urls-count">-</span></div>
+                                <div><strong>Mode:</strong> <span id="selective-scan-mode">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scan Results -->
+                    <div id="selective-scan-results" style="display: none;">
+                        <div class="results-card">
+                            <h4>✅ Scan Complete</h4>
+                            <div class="results-summary">
+                                <div class="result-stat">
+                                    <span class="result-label">URLs Scanned:</span>
+                                    <span class="result-value" id="result-urls-scanned">-</span>
+                                </div>
+                                <div class="result-stat">
+                                    <span class="result-label">Leaks Found:</span>
+                                    <span class="result-value" id="result-leaks-found">-</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" onclick="reloadScanDetails()">
+                                <span class="btn-icon">🔄</span> Refresh Results
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Screenshots Gallery -->

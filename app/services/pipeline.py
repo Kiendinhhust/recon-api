@@ -37,20 +37,40 @@ class ReconPipeline:
         self.amass_file = self.job_dir / "amass.txt"
         self.live_file = self.job_dir / "live.txt"
         self.httprobe_file = self.job_dir / "httprobe.txt"
+        # WAF and leak detection files
+        self.live_urls_file = self.job_dir / "live_urls.txt"
+        self.waf_results_file = self.job_dir / "waf_results.json"
+        self.urls_no_waf_file = self.job_dir / "urls_no_waf.txt"
+        self.leaks_output_dir = self.job_dir / "leaks_results"
     
     async def run_full_pipeline(self) -> Dict[str, Any]:
-        """Run the complete reconnaissance pipeline with enhanced CLI integration"""
+        """
+        Run the complete reconnaissance pipeline with enhanced CLI integration
+
+        Pipeline Steps (4 steps total):
+        1. Subdomain enumeration (subfinder + amass + assetfinder)
+        2. Live host detection (httprobe + httpx)
+        3. WAF detection (wafw00f)
+        4. Screenshot capture (gowitness)
+
+        NOTE: Source leak detection (SourceLeakHacker) has been REMOVED from the full pipeline.
+        Use the selective scanning API endpoint instead: POST /api/v1/scans/{job_id}/leak-scan
+        """
         results = {
             'job_id': self.job_id,
             'domain': self.domain,
             'subdomains': [],
             'live_hosts': [],
             'screenshots': [],
+            'waf_detections': [],
+            'leak_detections': [],  # Will be empty - use selective scanning API instead
             'errors': [],
             'stats': {
                 'total_subdomains': 0,
                 'live_hosts': 0,
-                'screenshots_taken': 0
+                'screenshots_taken': 0,
+                'waf_protected': 0,
+                'leaks_found': 0  # Will be 0 - use selective scanning API instead
             }
         }
 
@@ -68,7 +88,7 @@ class ReconPipeline:
                 return results
 
             # Step 2: Live host detection (httprobe + httpx)
-            self._update_progress(50, f"Checking live hosts for {len(subdomains)} subdomains...")
+            self._update_progress(40, f"Checking live hosts for {len(subdomains)} subdomains...")
             logger.info(f"[{self.job_id}] Checking live hosts for {len(subdomains)} subdomains")
 
             live_hosts = await self.check_live_hosts_enhanced(subdomains)
@@ -79,15 +99,37 @@ class ReconPipeline:
                 results['errors'].append("No live hosts found")
                 return results
 
-            # Step 3: Screenshot capture (gowitness)
-            self._update_progress(80, f"Capturing screenshots for {len(live_hosts)} live hosts...")
+            # Step 3: WAF detection (wafw00f)
+            self._update_progress(70, "Detecting WAFs with wafw00f...")
+            logger.info(f"[{self.job_id}] Running WAF detection on {len(live_hosts)} live hosts")
+            waf_detections = []
+            try:
+                waf_detections = await self._run_wafw00f_cli(live_hosts)
+                results['waf_detections'] = waf_detections
+                results['stats']['waf_protected'] = len([w for w in waf_detections if w.get('has_waf')])
+
+                # Filter out WAF-protected URLs
+                waf_urls = {w.get('url') for w in waf_detections if w.get('has_waf')}
+                non_waf_hosts = [h for h in live_hosts if h.get('url') not in waf_urls]
+
+                logger.info(f"[{self.job_id}] WAF detection: {len(waf_urls)} WAF-protected, {len(non_waf_hosts)} non-WAF")
+            except Exception as e:
+                logger.warning(f"[{self.job_id}] WAF detection failed: {e}")
+                results['errors'].append(f"WAF detection error: {str(e)}")
+                non_waf_hosts = live_hosts  # Fallback to all hosts if WAF detection fails
+
+            # Step 4: Screenshot capture (gowitness)
+            self._update_progress(85, f"Capturing screenshots for {len(live_hosts)} live hosts...")
             logger.info(f"[{self.job_id}] Capturing screenshots for {len(live_hosts)} live hosts")
 
             screenshots = await self.capture_screenshots_enhanced(live_hosts)
             results['screenshots'] = screenshots
             results['stats']['screenshots_taken'] = len(screenshots)
 
-            self._update_progress(100, "Pipeline completed successfully!")
+            # Pipeline completed - 4 steps only
+            # For leak detection, use the selective scanning API: POST /api/v1/scans/{job_id}/leak-scan
+            self._update_progress(100, "Pipeline completed successfully! (4/4 steps)")
+            logger.info(f"[{self.job_id}] Full pipeline completed. Use selective scanning API for leak detection.")
 
         except Exception as e:
             error_msg = f"Pipeline error: {str(e)}"
@@ -334,8 +376,22 @@ class ReconPipeline:
         with open(self.subs_file, 'r', encoding='utf-8', errors='ignore') as f:
             subs_content = f.read()
 
+        # Capture ALL status codes including 5xx errors
+        # Added flags:
+        # -retries 3: Retry failed requests up to 3 times (fixes domains that timeout on first attempt)
+        # -timeout 30: Set timeout to 30 seconds per request
+        # -follow-redirects: Follow HTTP redirects to get final status code
         result = subprocess.run(
-            [settings.httpx_path, "-silent", "-mc", "200,301,302,403,401", "-title", "-tech-detect", "-json"],
+            [
+                settings.httpx_path,
+                "-silent",
+                "-title",
+                "-tech-detect",
+                "-json",
+                "-retries", "3",
+                "-timeout", "30",
+                "-follow-redirects"
+            ],
             input=subs_content,
             capture_output=True,
             text=True,
@@ -348,7 +404,7 @@ class ReconPipeline:
         if result.returncode == 0 and result.stdout:
             with open(self.live_file, 'w', encoding='utf-8') as f:
                 f.write(result.stdout)
-            logger.info(f"[{self.job_id}] Httpx completed")
+            logger.info(f"[{self.job_id}] Httpx completed with retries and follow-redirects enabled")
 
     async def _run_gowitness_cli(self):
         """Run gowitness for screenshot capture (v3.x compatible)"""
@@ -419,10 +475,364 @@ class ReconPipeline:
 
         return list(set(subdomains))  # Deduplicate
 
+    async def _write_live_urls_file(self, live_hosts: List[Dict[str, Any]]):
+        """Write live URLs to a file for wafw00f input"""
+        urls = [h.get('url') for h in live_hosts if h.get('url')]
+        urls = list(dict.fromkeys(urls))  # Deduplicate while preserving order
+
+        with open(self.live_urls_file, 'w', encoding='utf-8') as f:
+            for url in urls:
+                f.write(f"{url}\n")
+
+        logger.info(f"[{self.job_id}] Wrote {len(urls)} live URLs to {self.live_urls_file}")
+
+    async def _run_wafw00f_cli(self, live_hosts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Run wafw00f to detect WAF/CDN protection"""
+        try:
+            # Write live URLs to file
+            await self._write_live_urls_file(live_hosts)
+
+            if not self.live_urls_file.exists() or self.live_urls_file.stat().st_size == 0:
+                logger.warning(f"[{self.job_id}] No live URLs to scan for WAF")
+                return []
+
+            # Run wafw00f
+            cmd = [
+                settings.wafw00f_path,
+                "-i", str(self.live_urls_file.name),
+                "-o", str(self.waf_results_file.name),
+                "-f", "json"
+            ]
+
+            await self._run_command_with_logging(cmd, "wafw00f", timeout=getattr(settings, 'wafw00f_timeout', 900))
+
+            # Parse wafw00f JSON output
+            # wafw00f outputs JSON array format with fields: detected, firewall, manufacturer, url
+            import json
+            detections: List[Dict[str, Any]] = []
+
+            if self.waf_results_file.exists():
+                try:
+                    with open(self.waf_results_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read().strip()
+                        if content:
+                            try:
+                                # wafw00f outputs a JSON array
+                                data_list = json.loads(content)
+                                if not isinstance(data_list, list):
+                                    data_list = [data_list]
+
+                                for data in data_list:
+                                    if isinstance(data, dict):
+                                        # Extract WAF name and manufacturer from wafw00f output
+                                        firewall = data.get('firewall', 'None')
+                                        manufacturer = data.get('manufacturer', 'None')
+
+                                        # Only mark as WAF if detected is True and firewall is not "None"
+                                        has_waf = data.get('detected', False) and firewall != 'None'
+
+                                        detections.append({
+                                            'url': data.get('url'),
+                                            'has_waf': has_waf,
+                                            'waf_name': firewall if firewall != 'None' else None,
+                                            'waf_manufacturer': manufacturer if manufacturer != 'None' else None
+                                        })
+                            except json.JSONDecodeError as je:
+                                logger.warning(f"[{self.job_id}] Failed to parse wafw00f JSON: {je}")
+                except Exception as e:
+                    logger.warning(f"[{self.job_id}] Failed to parse wafw00f results: {e}")
+
+            logger.info(f"[{self.job_id}] WAF detection completed: {len(detections)} URLs analyzed")
+            return detections
+
+        except Exception as e:
+            logger.error(f"[{self.job_id}] WAF detection error: {e}")
+            raise
+
+    async def _run_sourceleakhacker_cli(
+        self,
+        live_hosts: List[Dict[str, Any]],
+        waf_detections: List[Dict[str, Any]],
+        mode: Optional[str] = None,
+        selected_urls: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Run SourceLeakHacker on non-WAF URLs to detect source code leaks
+
+        Args:
+            live_hosts: List of live host dictionaries
+            waf_detections: List of WAF detection results
+            mode: Override scan mode (tiny/full), defaults to settings.sourceleakhacker_mode
+            selected_urls: Optional list of specific URLs to scan (for selective scanning)
+        """
+        try:
+            # Filter out WAF-protected URLs
+            waf_urls = {w.get('url') for w in waf_detections if w.get('has_waf')}
+            non_waf_urls = [h.get('url') for h in live_hosts if h.get('url') not in waf_urls]
+
+            # If selected_urls provided, filter to only those
+            if selected_urls:
+                non_waf_urls = [url for url in non_waf_urls if url in selected_urls]
+
+            if not non_waf_urls:
+                logger.info(f"[{self.job_id}] All URLs are WAF-protected, skipping leak detection")
+                return []
+
+            # Write non-WAF URLs to file
+            with open(self.urls_no_waf_file, 'w', encoding='utf-8') as f:
+                for url in non_waf_urls:
+                    f.write(f"{url}\n")
+
+            # Use override mode if provided, otherwise use settings
+            scan_mode = mode or getattr(settings, 'sourceleakhacker_mode', 'tiny')
+
+            logger.info(f"[{self.job_id}] Running SourceLeakHacker on {len(non_waf_urls)} non-WAF URLs (mode: {scan_mode})")
+
+            # Create output directory
+            self.leaks_output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Run SourceLeakHacker
+            import subprocess
+            from pathlib import Path
+
+            # SourceLeakHacker needs to run from its own directory (for dict files)
+            sourceleakhacker_dir = Path(settings.sourceleakhacker_path).parent
+
+            # Convert paths to absolute paths since SourceLeakHacker runs from its own directory
+            urls_file_absolute = Path(self.urls_no_waf_file).resolve()
+            output_dir_absolute = Path(self.leaks_output_dir).resolve()
+
+            cmd = [
+                settings.python_executable,
+                str(settings.sourceleakhacker_path),
+                f"--urls={str(urls_file_absolute)}",  # Use absolute path
+                f"--scale={scan_mode}",  # ADD: scale parameter for tiny/full mode
+                "--output", str(output_dir_absolute),  # Use absolute path
+                "--threads", str(getattr(settings, 'sourceleakhacker_threads', 8)),
+                "--timeout", str(getattr(settings, 'sourceleakhacker_timeout', 2800))
+            ]
+
+            logger.info(f"[{self.job_id}] SourceLeakHacker command: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                cwd=str(sourceleakhacker_dir),  # Changed to SourceLeakHacker directory
+                capture_output=True,
+                text=True,
+                timeout=getattr(settings, 'sourceleakhacker_timeout', 2800),
+                encoding='utf-8',
+                errors='ignore'
+            )
+
+            if result.returncode != 0:
+                logger.warning(f"[{self.job_id}] SourceLeakHacker returned code {result.returncode}: {result.stderr[:500]}")
+
+            # Parse SourceLeakHacker results from STDOUT and CSV files
+            leaks = await self._parse_sourceleakhacker_results(result.stdout)
+            logger.info(f"[{self.job_id}] Leak detection completed: {len(leaks)} leaks found")
+            return leaks
+
+        except Exception as e:
+            logger.error(f"[{self.job_id}] Source leak detection error: {e}")
+            raise
+
+    async def _parse_sourceleakhacker_results(self, stdout_output: str = "") -> List[Dict[str, Any]]:
+        """Parse SourceLeakHacker results from STDOUT and CSV files
+
+        Args:
+            stdout_output: STDOUT output from SourceLeakHacker command
+
+        Returns:
+            List of leak detection dictionaries
+        """
+        results: List[Dict[str, Any]] = []
+
+        # Parse STDOUT output first (real-time results)
+        # Format: [CODE]  SIZE    TIME    CONTENT_TYPE    URL
+        if stdout_output:
+            logger.info(f"[{self.job_id}] Parsing SourceLeakHacker STDOUT output...")
+            import re
+            from urllib.parse import urlparse
+
+            for line in stdout_output.splitlines():
+                line = line.strip()
+                # Parse ALL status codes, not just [200]
+                # Format: [403] 0 0.07s text/html https://example.com/.htaccess
+                match = re.match(r'\[(\d+)\]\s+(\d+)\s+([\d.]+)s?\s+(\S+)\s+(.+)', line)
+                if match:
+                    try:
+                        http_status = int(match.group(1))
+
+                        # Skip 404 status codes - these are "Not Found", not actual leaks
+                        if http_status == 404:
+                            continue
+
+                        file_size = match.group(2)
+                        response_time = match.group(3)
+                        content_type = match.group(4)
+                        url = match.group(5)
+
+                        # Extract base URL
+                        parsed = urlparse(url)
+                        base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+                        # Determine severity based on HTTP status and file type
+                        severity = 'low'
+
+                        # High severity: Accessible sensitive files (200)
+                        if http_status == 200:
+                            severity = 'high'
+                        # Medium severity: Forbidden files (403) - file exists but access denied
+                        elif http_status == 403:
+                            severity = 'medium'
+                        # Low severity: Other status codes
+                        else:
+                            severity = 'low'
+
+                        # Upgrade severity for critical file types
+                        if any(x in url.lower() for x in ['.sql', '.env', '.git/config', 'backup', 'database']):
+                            if severity == 'medium':
+                                severity = 'high'
+                            elif severity == 'low':
+                                severity = 'medium'
+                        elif any(x in url.lower() for x in ['.zip', '.tar', '.rar', '.bak', '.7z']):
+                            if severity == 'low':
+                                severity = 'medium'
+
+                        results.append({
+                            'base_url': base_url,
+                            'leaked_file_url': url,
+                            'file_type': content_type,
+                            'severity': severity,
+                            'file_size': file_size,
+                            'http_status': http_status
+                        })
+                    except Exception as e:
+                        logger.warning(f"[{self.job_id}] Failed to parse STDOUT line: {line} - {e}")
+
+        # Parse CSV files (if they exist)
+        if self.leaks_output_dir.exists():
+            logger.info(f"[{self.job_id}] Parsing SourceLeakHacker CSV files...")
+            csv_results = await self._parse_sourceleakhacker_csv_files()
+
+            # Merge results, avoiding duplicates
+            existing_urls = {r['leaked_file_url'] for r in results}
+            for csv_result in csv_results:
+                if csv_result['leaked_file_url'] not in existing_urls:
+                    results.append(csv_result)
+
+        logger.info(f"[{self.job_id}] Total leaks parsed: {len(results)}")
+        return results
+
+    async def _parse_sourceleakhacker_csv_files(self) -> List[Dict[str, Any]]:
+        """Parse CSV files from SourceLeakHacker output directory
+
+        SourceLeakHacker creates separate CSV files for each HTTP status code:
+        - 200.csv: Successful requests (accessible leaks)
+        - 403.csv: Forbidden (still leaks, just access denied)
+        - 404.csv: Not found (potential leaks)
+        - 0.csv: Connection errors
+        - etc.
+
+        CSV format: Code, Length, Time, Type, URL
+
+        NOTE: We parse ALL CSV files, not just 200.csv, because:
+        - 403 = File exists but forbidden (LEAK!)
+        - 404 = File might exist with different path
+        - Other codes = Still valuable information
+        """
+        results = []
+
+        try:
+            import csv
+            from urllib.parse import urlparse
+
+            # Parse ALL CSV files in the output directory (EXCEPT 404.csv)
+            csv_files = list(self.leaks_output_dir.glob("*.csv"))
+
+            if not csv_files:
+                logger.info(f"[{self.job_id}] No CSV files found in {self.leaks_output_dir}")
+                return results
+
+            logger.info(f"[{self.job_id}] Found {len(csv_files)} CSV files to parse")
+
+            for csv_file in csv_files:
+                http_status = csv_file.stem  # e.g., "200", "403", "404"
+
+                # Skip 404.csv - these are "Not Found" responses, not actual leaks
+                if http_status == "404":
+                    logger.info(f"[{self.job_id}] Skipping {csv_file.name} (404 = Not Found, not a leak)")
+                    continue
+
+                logger.info(f"[{self.job_id}] Parsing {csv_file.name}...")
+
+                file_count = 0
+                with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            url = row.get('URL', '')
+                            if not url:
+                                continue
+
+                            # Extract base URL
+                            parsed = urlparse(url)
+                            base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+                            # Determine severity based on HTTP status and file type
+                            severity = 'low'
+
+                            # High severity: Accessible sensitive files (200)
+                            if http_status == '200':
+                                severity = 'high'
+                            # Medium severity: Forbidden files (403) - file exists but access denied
+                            elif http_status == '403':
+                                severity = 'medium'
+                            # Low severity: Other status codes
+                            else:
+                                severity = 'low'
+
+                            # Upgrade severity for critical file types
+                            if any(x in url.lower() for x in ['.sql', '.env', '.git/config', 'backup', 'database']):
+                                if severity == 'medium':
+                                    severity = 'high'
+                                elif severity == 'low':
+                                    severity = 'medium'
+                            elif any(x in url.lower() for x in ['.zip', '.tar', '.rar', '.bak', '.7z']):
+                                if severity == 'low':
+                                    severity = 'medium'
+
+                            results.append({
+                                'base_url': base_url,
+                                'leaked_file_url': url,
+                                'file_type': row.get('Type', 'unknown'),
+                                'severity': severity,
+                                'file_size': row.get('Length'),
+                                'http_status': int(http_status) if http_status.isdigit() else 0
+                            })
+                            file_count += 1
+                        except Exception as e:
+                            logger.warning(f"[{self.job_id}] Failed to parse CSV row in {csv_file.name}: {row} - {e}")
+
+                logger.info(f"[{self.job_id}] Parsed {file_count} leaks from {csv_file.name}")
+
+            logger.info(f"[{self.job_id}] Total leaks from all CSV files: {len(results)}")
+
+        except Exception as e:
+            logger.warning(f"[{self.job_id}] Failed parsing CSV files: {e}")
+
+        return results
+
     async def _parse_live_results(self) -> List[Dict[str, Any]]:
-        """Parse httpx JSON output"""
+        """Parse httpx JSON output - includes both live and dead hosts with status codes"""
         if not self.live_file.exists():
             return []
+
+        # Status codes that indicate a "live" host (server is responding)
+        # 2xx: Success
+        # 3xx: Redirects (server is responding)
+        # 4xx: Client errors (server is responding)
+        # 5xx: Server errors (server is responding - important for visibility!)
+        LIVE_STATUS_CODES = {200, 301, 302, 304, 307, 308, 400, 401, 403, 500, 501, 502, 503, 504}
 
         live_hosts = []
         with open(self.live_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -434,9 +844,13 @@ class ReconPipeline:
                 try:
                     import json
                     data = json.loads(line)
+                    status_code = data.get('status_code')
+                    is_live = status_code in LIVE_STATUS_CODES if status_code else False
+
                     live_hosts.append({
                         'url': data.get('url', ''),
-                        'status_code': data.get('status_code'),
+                        'status_code': status_code,
+                        'is_live': is_live,
                         'response_time': data.get('response_time'),
                         'title': data.get('title', '').strip() if data.get('title') else None,
                         'tech': data.get('tech', []) if data.get('tech') else [],
@@ -580,7 +994,7 @@ class ReconPipeline:
         return screenshots
     
     # Enhanced command execution methods
-    async def _run_command_with_logging(self, cmd: List[str], tool_name: str, timeout: int = 1900) -> str:
+    async def _run_command_with_logging(self, cmd: List[str], tool_name: str, timeout: int = 2600) -> str:
         """Run a command with enhanced logging and progress tracking (Windows compatible)"""
         try:
             logger.info(f"[{self.job_id}] Starting {tool_name}: {' '.join(cmd)}")
@@ -588,13 +1002,10 @@ class ReconPipeline:
             logger.info(f"[{self.job_id}] Command executable: {cmd[0]}")
 
             # Check if executable exists
-            import os
             if not os.path.exists(cmd[0]):
                 raise FileNotFoundError(f"Tool not found: {cmd[0]}")
 
             # Use synchronous subprocess for Windows compatibility
-            import subprocess
-
             result = subprocess.run(
                 cmd,
                 cwd=str(self.job_dir),
@@ -640,8 +1051,6 @@ class ReconPipeline:
             logger.info(f"[{self.job_id}] Starting {tool_name}: {cmd}")
 
             # Use synchronous subprocess for Windows compatibility
-            import subprocess
-
             result = subprocess.run(
                 cmd,
                 shell=True,

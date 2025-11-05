@@ -1,11 +1,11 @@
 """
 Repository layer for database operations
 """
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.storage.models import ScanJob, Subdomain, Screenshot, ScanStatus, SubdomainStatus
+from app.storage.models import ScanJob, Subdomain, Screenshot, ScanStatus, SubdomainStatus, WafDetection, LeakDetection
 
 
 class ScanJobRepository:
@@ -49,9 +49,9 @@ class ScanJobRepository:
             self.db.refresh(scan_job)
         return scan_job
     
-    def get_recent_scans(self, limit: int = 10) -> List[ScanJob]:
-        """Get recent scan jobs"""
-        return self.db.query(ScanJob).order_by(desc(ScanJob.created_at)).limit(limit).all()
+    def get_recent_scans(self, limit: int = 100, offset: int = 0) -> List[ScanJob]:
+        """Get recent scan jobs with pagination support"""
+        return self.db.query(ScanJob).order_by(desc(ScanJob.created_at)).limit(limit).offset(offset).all()
 
 
 class SubdomainRepository:
@@ -145,3 +145,61 @@ class ScreenshotRepository:
     def get_screenshots_by_subdomain(self, subdomain_id: int) -> List[Screenshot]:
         """Get screenshots for a specific subdomain"""
         return self.db.query(Screenshot).filter(Screenshot.subdomain_id == subdomain_id).all()
+
+
+class WafDetectionRepository:
+    """Repository for WAF detection operations"""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def bulk_create(self, scan_job_id: int, detections: List[Dict[str, Any]]) -> List[WafDetection]:
+        """Bulk create WAF detections"""
+        waf_objs = []
+        for detection in detections:
+            waf_obj = WafDetection(
+                scan_job_id=scan_job_id,
+                url=detection.get('url'),
+                has_waf=detection.get('has_waf', False),
+                waf_name=detection.get('waf_name'),
+                waf_manufacturer=detection.get('waf_manufacturer')
+            )
+            waf_objs.append(waf_obj)
+
+        self.db.add_all(waf_objs)
+        self.db.commit()
+        return waf_objs
+
+    def get_by_job(self, job_id: str) -> List[WafDetection]:
+        """Get all WAF detections for a scan job"""
+        return self.db.query(WafDetection).join(ScanJob).filter(ScanJob.job_id == job_id).all()
+
+
+class LeakDetectionRepository:
+    """Repository for leak detection operations"""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def bulk_create(self, scan_job_id: int, leaks: List[Dict[str, Any]]) -> List[LeakDetection]:
+        """Bulk create leak detections"""
+        leak_objs = []
+        for leak in leaks:
+            leak_obj = LeakDetection(
+                scan_job_id=scan_job_id,
+                base_url=leak.get('base_url'),
+                leaked_file_url=leak.get('leaked_file_url'),
+                file_type=leak.get('file_type'),
+                severity=leak.get('severity'),
+                file_size=leak.get('file_size'),
+                http_status=leak.get('http_status')  # Add HTTP status code
+            )
+            leak_objs.append(leak_obj)
+
+        self.db.add_all(leak_objs)
+        self.db.commit()
+        return leak_objs
+
+    def get_by_job(self, job_id: str) -> List[LeakDetection]:
+        """Get all leak detections for a scan job"""
+        return self.db.query(LeakDetection).join(ScanJob).filter(ScanJob.job_id == job_id).all()

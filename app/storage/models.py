@@ -41,6 +41,8 @@ class ScanJob(Base):
     # Relationships
     subdomains = relationship("Subdomain", back_populates="scan_job", cascade="all, delete-orphan")
     screenshots = relationship("Screenshot", back_populates="scan_job", cascade="all, delete-orphan")
+    waf_detections = relationship("WafDetection", back_populates="scan_job", cascade="all, delete-orphan")
+    leak_detections = relationship("LeakDetection", back_populates="scan_job", cascade="all, delete-orphan")
 
 
 class Subdomain(Base):
@@ -65,7 +67,7 @@ class Subdomain(Base):
 class Screenshot(Base):
     """Screenshot model"""
     __tablename__ = "screenshots"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     scan_job_id = Column(Integer, ForeignKey("scan_jobs.id"), nullable=False)
     subdomain_id = Column(Integer, ForeignKey("subdomains.id"), nullable=True)
@@ -74,7 +76,41 @@ class Screenshot(Base):
     file_path = Column(String, nullable=False)
     file_size = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     scan_job = relationship("ScanJob", back_populates="screenshots")
     subdomain = relationship("Subdomain", back_populates="screenshots")
+
+
+class WafDetection(Base):
+    """WAF detection results from wafw00f"""
+    __tablename__ = "waf_detections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_job_id = Column(Integer, ForeignKey("scan_jobs.id"), nullable=False)
+    url = Column(String, nullable=False)
+    has_waf = Column(Boolean, default=False)
+    waf_name = Column(String, nullable=True)
+    waf_manufacturer = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_job = relationship("ScanJob", back_populates="waf_detections")
+
+
+class LeakDetection(Base):
+    """Source code leak detection results from SourceLeakHacker"""
+    __tablename__ = "leak_detections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_job_id = Column(Integer, ForeignKey("scan_jobs.id"), nullable=False)
+    base_url = Column(String, nullable=False)
+    leaked_file_url = Column(String, nullable=False)
+    file_type = Column(String, nullable=True)
+    severity = Column(String, nullable=True)
+    file_size = Column(Integer, nullable=True)
+    http_status = Column(Integer, nullable=True)  # HTTP status code (200, 403, 404, etc.)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_job = relationship("ScanJob", back_populates="leak_detections")
