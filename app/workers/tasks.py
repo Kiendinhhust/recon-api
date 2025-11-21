@@ -459,21 +459,6 @@ def run_waf_check(self, job_id: str, domain: str, live_hosts: List[Dict[str, Any
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def run_sourceleakhacker_check(self, job_id: str, selected_urls: List[str], mode: str = "tiny") -> Dict[str, Any]:
-    """
-    NEW TASK: Run SourceLeakHacker on user-selected URLs
-
-    This task is dispatched by the selective scanning API endpoint.
-    It runs SourceLeakHacker on specific URLs chosen by the user,
-    parses the results, and saves them to the database.
-
-    Args:
-        job_id: The scan job ID
-        selected_urls: List of URLs to scan (user-selected from frontend)
-        mode: Scan mode ("tiny" or "full")
-
-    Returns:
-        Dict with job_id, urls_scanned, leaks_found, and status
-    """
     db = SessionLocal()
 
     try:

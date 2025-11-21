@@ -1,0 +1,25 @@
+[Unit]
+Description=Recon API FastAPI Application
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=recon
+Group=recon
+WorkingDirectory=/home/recon/recon-api
+Environment="PATH=/home/recon/recon-api/venv/bin:/home/recon/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/recon/recon-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

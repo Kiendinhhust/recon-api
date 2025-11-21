@@ -53,7 +53,7 @@ The system integrates **8 external reconnaissance tools**:
 | **httprobe** | HTTP/HTTPS probe | Go | `go install github.com/tomnomnom/httprobe@latest` |
 | **httpx** | Advanced HTTP toolkit | Go | `go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest` |
 | **anew** | Append new lines to file | Go | `go install -v github.com/tomnomnom/anew@latest` |
-| **gowitness** | Web screenshot tool | Go | `go install github.com/sensepost/gowitness@latest` |
+| **gowitness** |   | Go | `go install github.com/sensepost/gowitness@latest` |
 | **wafw00f** | WAF detection | Python | `pip install wafw00f` |
 | **SourceLeakHacker** | Source code leak scanner | Python | Custom script (SourceLeakHacker.py) |
 

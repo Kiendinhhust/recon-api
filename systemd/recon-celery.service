@@ -1,0 +1,26 @@
+[Unit]
+Description=Recon Celery Worker
+After=network.target redis.service postgresql.service
+Wants=redis.service postgresql.service
+
+[Service]
+Type=simple
+User=recon
+Group=recon
+WorkingDirectory=/home/recon/recon-api
+Environment="PATH=/home/recon/recon-api/venv/bin:/home/recon/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="C_FORCE_ROOT=true"
+ExecStart=/home/recon/recon-api/venv/bin/celery -A app.workers.celery_app worker --loglevel=info -Q recon_full,leak_check,waf_check -n worker1@%%h --concurrency=2
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
