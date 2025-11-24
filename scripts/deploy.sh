@@ -185,9 +185,28 @@ if [ "$SKIP_MIGRATIONS" = false ]; then
     # Load environment variables from .env file
     if [ -f "${APP_PATH}/.env" ]; then
         print_info "Loading environment variables from .env..."
-        export $(grep -v '^#' "${APP_PATH}/.env" | xargs)
+
+        # Load .env file line by line to handle special characters properly
+        while IFS= read -r line || [ -n "$line" ]; do
+            # Skip comments and empty lines
+            if [[ ! "$line" =~ ^[[:space:]]*# ]] && [[ -n "$line" ]]; then
+                # Export the variable
+                export "$line"
+            fi
+        done < "${APP_PATH}/.env"
+
+        # Verify DATABASE_URL is set
+        if [ -n "$DATABASE_URL" ]; then
+            MASKED_URL=$(echo "$DATABASE_URL" | sed 's/:[^:@]*@/:***@/')
+            print_success "DATABASE_URL loaded: $MASKED_URL"
+        else
+            print_error "DATABASE_URL not found in .env file"
+            exit 1
+        fi
     else
-        print_warning ".env file not found - using default database configuration"
+        print_error ".env file not found at ${APP_PATH}/.env"
+        print_warning "Please create .env file with DATABASE_URL before deploying"
+        exit 1
     fi
 
     print_info "Checking for pending migrations..."

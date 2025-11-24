@@ -139,18 +139,58 @@ jobs:
           ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
             set -e
             cd /home/recon/recon-api
-            
+
             echo "Running database migrations..."
             source venv/bin/activate
-            
-            # Check if there are pending migrations
-            if alembic current 2>&1 | grep -q "head"; then
-              echo "Database is up to date"
+
+            # Load environment variables from .env file
+            if [ -f .env ]; then
+              echo "✓ .env file found"
+
+              # Load .env file line by line to handle special characters properly
+              while IFS= read -r line || [ -n "$line" ]; do
+                # Skip comments and empty lines
+                if [[ ! "$line" =~ ^[[:space:]]*# ]] && [[ -n "$line" ]]; then
+                  # Export the variable
+                  export "$line"
+                fi
+              done < .env
+
+              # Verify DATABASE_URL is set (mask password for security)
+              if [ -n "$DATABASE_URL" ]; then
+                MASKED_URL=$(echo "$DATABASE_URL" | sed 's/:[^:@]*@/:***@/')
+                echo "✓ DATABASE_URL loaded: $MASKED_URL"
+
+                # Extract and verify username
+                USERNAME=$(echo "$DATABASE_URL" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
+                echo "✓ Database user: $USERNAME"
+
+                if [ "$USERNAME" != "recon_user" ]; then
+                  echo "✗ ERROR: Expected user 'recon_user' but got '$USERNAME'"
+                  exit 1
+                fi
+              else
+                echo "✗ ERROR: DATABASE_URL not found in .env file"
+                exit 1
+              fi
             else
-              echo "Running alembic upgrade head..."
-              alembic upgrade head
-              echo "Database migrations completed"
+              echo "✗ ERROR: .env file not found at /home/recon/recon-api/.env"
+              echo "Please create .env file with DATABASE_URL before deploying"
+              exit 1
             fi
+
+            # Verify alembic/env.py has the override logic
+            if grep -q "os.getenv.*DATABASE_URL" alembic/env.py; then
+              echo "✓ alembic/env.py has DATABASE_URL override logic"
+            else
+              echo "✗ WARNING: alembic/env.py missing DATABASE_URL override logic"
+              echo "This might cause authentication issues"
+            fi
+
+            # Run migrations
+            echo "Running alembic upgrade head..."
+            alembic upgrade head
+            echo "✓ Database migrations completed"
           EOF
 
       # ============================================================================
