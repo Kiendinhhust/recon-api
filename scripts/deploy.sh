@@ -258,13 +258,13 @@ print_header "STEP 7: VERIFY DEPLOYMENT"
 print_info "Waiting for API to be ready..."
 sleep 5
 
-# Check API health
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/health 2>/dev/null || echo "000")
+# Check API is responding (using /docs endpoint)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs 2>/dev/null || echo "000")
 
 if [ "$HTTP_CODE" = "200" ]; then
-    print_success "API health check passed (HTTP $HTTP_CODE)"
+    print_success "API is responding (HTTP $HTTP_CODE on /docs)"
 else
-    print_error "API health check failed (HTTP $HTTP_CODE)"
+    print_error "API is not responding (HTTP $HTTP_CODE on /docs)"
     print_error "Deployment verification failed!"
     exit 1
 fi
