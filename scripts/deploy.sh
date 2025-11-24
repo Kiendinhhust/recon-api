@@ -179,14 +179,22 @@ fi
 
 if [ "$SKIP_MIGRATIONS" = false ]; then
     print_header "STEP 5: RUN DATABASE MIGRATIONS"
-    
+
     source "$VENV_PATH/bin/activate"
-    
+
+    # Load environment variables from .env file
+    if [ -f "${APP_PATH}/.env" ]; then
+        print_info "Loading environment variables from .env..."
+        export $(grep -v '^#' "${APP_PATH}/.env" | xargs)
+    else
+        print_warning ".env file not found - using default database configuration"
+    fi
+
     print_info "Checking for pending migrations..."
-    
+
     # Run migrations
     alembic upgrade head
-    
+
     print_success "Database migrations completed"
 else
     print_warning "Skipping database migrations (--skip-migrations flag)"
