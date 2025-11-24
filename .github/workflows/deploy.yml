@@ -100,19 +100,18 @@ jobs:
       - name: 🔍 Check for dependency changes
         id: check_deps
         run: |
-          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
-            set -e
-            cd /home/recon/recon-api
-            
-            # Check if requirements.txt changed
-            if git diff HEAD@{1} HEAD --name-only | grep -q "requirements.txt"; then
-              echo "requirements.txt changed - will update dependencies"
-              echo "DEPS_CHANGED=true" >> $GITHUB_OUTPUT
-            else
-              echo "requirements.txt unchanged - skipping dependency update"
-              echo "DEPS_CHANGED=false" >> $GITHUB_OUTPUT
-            fi
-          EOF
+          # Run git diff on VPS and capture result in runner environment
+          RESULT=$(ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cd /home/recon/recon-api && if git diff HEAD@{1} HEAD --name-only | grep -q "requirements.txt"; then echo "true"; else echo "false"; fi')
+
+          # Set output variable in runner context (where $GITHUB_OUTPUT is available)
+          echo "DEPS_CHANGED=$RESULT" >> $GITHUB_OUTPUT
+
+          # Display result
+          if [ "$RESULT" = "true" ]; then
+            echo "✓ requirements.txt changed - will update dependencies"
+          else
+            echo "ℹ requirements.txt unchanged - skipping dependency update"
+          fi
 
       # ============================================================================
       # STEP 6: UPDATE DEPENDENCIES (if changed)
