@@ -279,16 +279,97 @@ go install github.com/sensepost/gowitness@latest
 sudo pip3 install wafw00f
 ```
 
-### Bước 6.9: Upload SourceLeakHacker.py
+### Bước 6.9: Upload SourceLeakHacker (TOÀN BỘ FOLDER)
+
+**⚠️ QUAN TRỌNG:** SourceLeakHacker cần **TOÀN BỘ folder structure**, không chỉ file `.py`!
+
+**Tại sao?** SourceLeakHacker cần `dict/` folder chứa dictionary files để scan.
+
+---
+
+#### **Từ Windows PowerShell:**
+
+```powershell
+# Phương án 1: Dùng script tự động (KHUYẾN NGHỊ)
+.\upload_sourceleakhacker.ps1
+
+# Phương án 2: Upload thủ công với SCP
+scp -r E:\SourceLeakHacker\SourceLeakHacker-master root@124.197.22.184:/home/recon/recon-api/SourceLeakHacker
+
+# Giải thích:
+# -r : Recursive (upload cả folder)
+# E:\SourceLeakHacker\SourceLeakHacker-master : Source trên Windows
+# /home/recon/recon-api/SourceLeakHacker : Destination trên VPS
+```
+
+---
+
+#### **Trên VPS - Set permissions:**
 
 ```bash
-# Đảm bảo file SourceLeakHacker.py đã được upload cùng với code
-# Kiểm tra
-ls -la /home/recon/recon-api/SourceLeakHacker.py
+# Set ownership
+sudo chown -R recon:recon /home/recon/recon-api/SourceLeakHacker
 
-# Nếu chưa có, upload từ Windows:
-# scp C:\recon-api\SourceLeakHacker.py root@124.197.22.184:/home/recon/recon-api/
+# Set permissions
+sudo chmod -R 755 /home/recon/recon-api/SourceLeakHacker
+
+# Make script executable
+sudo chmod +x /home/recon/recon-api/SourceLeakHacker/SourceLeakHacker.py
+
+# Verify structure
+ls -la /home/recon/recon-api/SourceLeakHacker/
+# Should show:
+# SourceLeakHacker.py
+# dict/
+# requirements.txt
+# ...
+
+# Verify dict folder
+ls -la /home/recon/recon-api/SourceLeakHacker/dict/
+# Should show dictionary files
 ```
+
+---
+
+#### **Install dependencies (nếu cần):**
+
+```bash
+# Switch to recon user
+sudo su - recon
+
+# Navigate to recon-api
+cd /home/recon/recon-api
+
+# Activate venv
+source venv/bin/activate
+
+# Install SourceLeakHacker dependencies (if requirements.txt exists)
+if [ -f SourceLeakHacker/requirements.txt ]; then
+    pip install -r SourceLeakHacker/requirements.txt
+fi
+
+# Exit recon user
+exit
+```
+
+---
+
+#### **Verify installation:**
+
+```bash
+# Run verification script
+chmod +x verify_sourceleakhacker.sh
+./verify_sourceleakhacker.sh
+
+# Or manual verification:
+sudo su - recon
+cd /home/recon/recon-api
+source venv/bin/activate
+python3 SourceLeakHacker/SourceLeakHacker.py --help
+exit
+```
+
+**Xem thêm:** `UPLOAD_SOURCELEAKHACKER_GUIDE.md` cho hướng dẫn chi tiết
 
 ### Bước 6.10: Kiểm tra tất cả tools
 
@@ -369,7 +450,9 @@ HTTPROBE_PATH=httprobe
 ANEW_PATH=anew
 GOWITNESS_PATH=gowitness
 WAFW00F_PATH=wafw00f
-SOURCELEAKHACKER_PATH=/home/recon/recon-api/SourceLeakHacker.py
+
+# SourceLeakHacker (FULL PATH to .py file INSIDE folder)
+SOURCELEAKHACKER_PATH=/home/recon/recon-api/SourceLeakHacker/SourceLeakHacker.py
 PYTHON_EXECUTABLE=python3.13
 
 # Tool timeouts (seconds)

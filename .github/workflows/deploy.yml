@@ -1,0 +1,258 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to main branch
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+env:
+  VPS_HOST: 124.197.22.184
+  VPS_USER: recon
+  APP_PATH: /home/recon/recon-api
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  deploy:
+    name: Deploy to Production VPS
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ============================================================================
+      # STEP 1: CHECKOUT CODE
+      # ============================================================================
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better rollback capability
+
+      # ============================================================================
+      # STEP 2: SETUP SSH
+      # ============================================================================
+      - name: 🔐 Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+          # Test SSH connection
+          ssh -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "echo 'SSH connection successful'"
+
+      # ============================================================================
+      # STEP 3: CREATE BACKUP
+      # ============================================================================
+      - name: 💾 Create backup on VPS
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            
+            BACKUP_DIR="/home/recon/backups"
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            BACKUP_PATH="${BACKUP_DIR}/recon-api_${TIMESTAMP}"
+            
+            echo "Creating backup at ${BACKUP_PATH}..."
+            mkdir -p "${BACKUP_DIR}"
+            
+            # Backup application code (exclude venv, jobs, __pycache__)
+            rsync -a --exclude='venv' --exclude='jobs' --exclude='__pycache__' \
+              /home/recon/recon-api/ "${BACKUP_PATH}/"
+            
+            # Save current git commit hash
+            cd /home/recon/recon-api
+            git rev-parse HEAD > "${BACKUP_PATH}/COMMIT_HASH" || echo "unknown" > "${BACKUP_PATH}/COMMIT_HASH"
+            
+            echo "Backup created successfully: ${BACKUP_PATH}"
+            echo "BACKUP_PATH=${BACKUP_PATH}" >> /tmp/deployment_vars
+            
+            # Keep only last 5 backups
+            cd "${BACKUP_DIR}"
+            ls -t | tail -n +6 | xargs -r rm -rf
+            echo "Old backups cleaned up (kept last 5)"
+          EOF
+
+      # ============================================================================
+      # STEP 4: PULL LATEST CODE
+      # ============================================================================
+      - name: 📦 Pull latest code on VPS
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            cd /home/recon/recon-api
+            
+            echo "Pulling latest code from GitHub..."
+            git fetch origin
+            git reset --hard origin/main
+            
+            # Save new commit hash
+            NEW_COMMIT=$(git rev-parse HEAD)
+            echo "Deployed commit: ${NEW_COMMIT}"
+            echo "NEW_COMMIT=${NEW_COMMIT}" >> /tmp/deployment_vars
+          EOF
+
+      # ============================================================================
+      # STEP 5: CHECK FOR DEPENDENCY CHANGES
+      # ============================================================================
+      - name: 🔍 Check for dependency changes
+        id: check_deps
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            cd /home/recon/recon-api
+            
+            # Check if requirements.txt changed
+            if git diff HEAD@{1} HEAD --name-only | grep -q "requirements.txt"; then
+              echo "requirements.txt changed - will update dependencies"
+              echo "DEPS_CHANGED=true" >> $GITHUB_OUTPUT
+            else
+              echo "requirements.txt unchanged - skipping dependency update"
+              echo "DEPS_CHANGED=false" >> $GITHUB_OUTPUT
+            fi
+          EOF
+
+      # ============================================================================
+      # STEP 6: UPDATE DEPENDENCIES (if changed)
+      # ============================================================================
+      - name: 📚 Update Python dependencies
+        if: steps.check_deps.outputs.DEPS_CHANGED == 'true'
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            cd /home/recon/recon-api
+            
+            echo "Updating Python dependencies..."
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            echo "Dependencies updated successfully"
+          EOF
+
+      # ============================================================================
+      # STEP 7: RUN DATABASE MIGRATIONS
+      # ============================================================================
+      - name: 🗄️ Run database migrations
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            cd /home/recon/recon-api
+            
+            echo "Running database migrations..."
+            source venv/bin/activate
+            
+            # Check if there are pending migrations
+            if alembic current 2>&1 | grep -q "head"; then
+              echo "Database is up to date"
+            else
+              echo "Running alembic upgrade head..."
+              alembic upgrade head
+              echo "Database migrations completed"
+            fi
+          EOF
+
+      # ============================================================================
+      # STEP 8: RESTART SERVICES
+      # ============================================================================
+      - name: 🔄 Restart services
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            
+            echo "Restarting services..."
+            
+            # Restart Celery first (workers)
+            sudo systemctl restart recon-celery
+            sleep 3
+            
+            # Restart API (zero-downtime: new process starts before old one stops)
+            sudo systemctl restart recon-api
+            sleep 5
+            
+            echo "Services restarted"
+          EOF
+
+      # ============================================================================
+      # STEP 9: VERIFY DEPLOYMENT
+      # ============================================================================
+      - name: ✅ Verify deployment
+        id: verify
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            
+            echo "Verifying deployment..."
+            
+            # Check if services are running
+            if ! systemctl is-active --quiet recon-api; then
+              echo "ERROR: recon-api service is not running!"
+              exit 1
+            fi
+            
+            if ! systemctl is-active --quiet recon-celery; then
+              echo "ERROR: recon-celery service is not running!"
+              exit 1
+            fi
+            
+            echo "✓ Services are running"
+            
+            # Check if API responds
+            sleep 5  # Give API time to fully start
+            
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/health || echo "000")
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✓ API health check passed (HTTP $HTTP_CODE)"
+            else
+              echo "ERROR: API health check failed (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+            
+            echo "Deployment verification successful!"
+          EOF
+
+      # ============================================================================
+      # STEP 10: ROLLBACK ON FAILURE
+      # ============================================================================
+      - name: 🔙 Rollback on failure
+        if: failure()
+        run: |
+          ssh ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            set -e
+            
+            echo "Deployment failed! Rolling back..."
+            
+            # Get backup path
+            BACKUP_PATH=$(ls -t /home/recon/backups | head -1)
+            
+            if [ -z "$BACKUP_PATH" ]; then
+              echo "ERROR: No backup found for rollback!"
+              exit 1
+            fi
+            
+            FULL_BACKUP_PATH="/home/recon/backups/${BACKUP_PATH}"
+            echo "Rolling back to: ${FULL_BACKUP_PATH}"
+            
+            # Restore code (exclude venv, jobs)
+            rsync -a --exclude='venv' --exclude='jobs' \
+              "${FULL_BACKUP_PATH}/" /home/recon/recon-api/
+            
+            # Restart services
+            sudo systemctl restart recon-celery
+            sudo systemctl restart recon-api
+            
+            echo "Rollback completed"
+          EOF
+
+      # ============================================================================
+      # STEP 11: CLEANUP
+      # ============================================================================
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          echo "SSH key cleaned up"
+
