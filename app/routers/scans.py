@@ -701,3 +701,255 @@ async def add_subdomain_manually(
         discovered_by=subdomain.discovered_by,
         message=f"Subdomain '{subdomain.subdomain}' added successfully"
     )
+
+
+# ============================================================================
+# JOB MANAGEMENT ENDPOINTS
+# ============================================================================
+
+class StopScanResponse(BaseModel):
+    """Response for stop scan operation"""
+    job_id: str
+    status: str
+    message: str
+    task_id: Optional[str] = None
+
+
+class DeleteScanResponse(BaseModel):
+    """Response for delete scan operation"""
+    job_id: str
+    message: str
+    deleted_items: dict
+
+
+@router.post("/scans/{job_id}/stop", response_model=StopScanResponse)
+async def stop_scan(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
+):
+    """
+    Stop a running scan job by revoking the Celery task.
+
+    This endpoint will:
+    1. Revoke the Celery task (terminate=True)
+    2. Update scan status to "cancelled"
+    3. Keep all partial results in the database
+
+    **Parameters:**
+    - `job_id`: The ID of the scan job to stop
+
+    **Returns:**
+    - Status information about the stopped scan
+
+    **Note:** This does NOT delete the scan data. Use DELETE endpoints to remove data.
+    """
+    from app.workers.celery_app import celery_app
+
+    # Get scan job from database
+    scan_repo = ScanJobRepository(db)
+    scan_job = scan_repo.get_scan_job(job_id)
+
+    if not scan_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job {job_id} not found"
+        )
+
+    # Check if scan is already completed or failed
+    if scan_job.status in [ScanStatus.COMPLETED, ScanStatus.FAILED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot stop scan with status '{scan_job.status}'. Scan is already finished."
+        )
+
+    # Revoke Celery task if task_id exists
+    task_revoked = False
+    if scan_job.task_id:
+        try:
+            # Revoke task with terminate=True to kill the worker process
+            celery_app.control.revoke(scan_job.task_id, terminate=True, signal='SIGKILL')
+            task_revoked = True
+        except Exception as e:
+            # Log error but continue to update status
+            print(f"Error revoking task {scan_job.task_id}: {e}")
+
+    # Update scan status to cancelled
+    scan_repo.update_scan_status(job_id, "cancelled", error_message="Scan stopped by user")
+
+    return StopScanResponse(
+        job_id=job_id,
+        status="cancelled",
+        task_id=scan_job.task_id if task_revoked else None,
+        message=f"Scan stopped successfully. Task {'revoked' if task_revoked else 'not found'}. Partial results preserved."
+    )
+
+
+@router.delete("/scans/{job_id}", response_model=DeleteScanResponse)
+async def delete_scan(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
+):
+    """
+    Delete a COMPLETED or FAILED scan job and all related data.
+
+    This endpoint will:
+    1. Check that scan is not running
+    2. Delete all related data (subdomains, screenshots, WAF detections, leak detections)
+    3. Delete screenshot files from disk
+    4. Delete the scan job record
+
+    **Parameters:**
+    - `job_id`: The ID of the scan job to delete
+
+    **Returns:**
+    - Summary of deleted items
+
+    **Note:** This will NOT delete running scans. Use POST /scans/{job_id}/stop first,
+    or use DELETE /scans/{job_id}/force to stop and delete in one operation.
+    """
+    import shutil
+    from pathlib import Path
+    from app.deps import settings
+
+    # Get scan job from database
+    scan_repo = ScanJobRepository(db)
+    scan_job = scan_repo.get_scan_job(job_id)
+
+    if not scan_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job {job_id} not found"
+        )
+
+    # Check if scan is still running
+    if scan_job.status in [ScanStatus.PENDING, ScanStatus.RUNNING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete running scan (status: {scan_job.status}). Use POST /scans/{job_id}/stop first, or DELETE /scans/{job_id}/force to stop and delete."
+        )
+
+    # Count items before deletion
+    deleted_items = {
+        "subdomains": len(scan_job.subdomains),
+        "screenshots": len(scan_job.screenshots),
+        "waf_detections": len(scan_job.waf_detections),
+        "leak_detections": len(scan_job.leak_detections)
+    }
+
+    # Delete screenshot files from disk
+    screenshots_deleted = 0
+    for screenshot in scan_job.screenshots:
+        try:
+            screenshot_path = Path(screenshot.file_path)
+            if screenshot_path.exists():
+                screenshot_path.unlink()
+                screenshots_deleted += 1
+        except Exception as e:
+            print(f"Error deleting screenshot file {screenshot.file_path}: {e}")
+
+    # Delete job directory if it exists
+    job_dir = Path(settings.jobs_directory) / job_id
+    if job_dir.exists():
+        try:
+            shutil.rmtree(job_dir)
+        except Exception as e:
+            print(f"Error deleting job directory {job_dir}: {e}")
+
+    # Delete scan job (cascade will delete all related records)
+    db.delete(scan_job)
+    db.commit()
+
+    return DeleteScanResponse(
+        job_id=job_id,
+        message=f"Scan job deleted successfully. Removed {screenshots_deleted} screenshot files from disk.",
+        deleted_items=deleted_items
+    )
+
+
+@router.delete("/scans/{job_id}/force", response_model=DeleteScanResponse)
+async def force_delete_scan(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
+):
+    """
+    Force delete a scan job (STOP + DELETE in one operation).
+
+    This endpoint will:
+    1. Revoke the Celery task if running (terminate=True)
+    2. Delete all related data (subdomains, screenshots, WAF detections, leak detections)
+    3. Delete screenshot files from disk
+    4. Delete the scan job record
+
+    **Parameters:**
+    - `job_id`: The ID of the scan job to force delete
+
+    **Returns:**
+    - Summary of deleted items
+
+    **Warning:** This will forcefully terminate running scans and delete all data.
+    Use with caution!
+    """
+    import shutil
+    from pathlib import Path
+    from app.deps import settings
+    from app.workers.celery_app import celery_app
+
+    # Get scan job from database
+    scan_repo = ScanJobRepository(db)
+    scan_job = scan_repo.get_scan_job(job_id)
+
+    if not scan_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job {job_id} not found"
+        )
+
+    # Revoke Celery task if running
+    task_revoked = False
+    if scan_job.task_id and scan_job.status in [ScanStatus.PENDING, ScanStatus.RUNNING]:
+        try:
+            celery_app.control.revoke(scan_job.task_id, terminate=True, signal='SIGKILL')
+            task_revoked = True
+        except Exception as e:
+            print(f"Error revoking task {scan_job.task_id}: {e}")
+
+    # Count items before deletion
+    deleted_items = {
+        "subdomains": len(scan_job.subdomains),
+        "screenshots": len(scan_job.screenshots),
+        "waf_detections": len(scan_job.waf_detections),
+        "leak_detections": len(scan_job.leak_detections),
+        "task_revoked": task_revoked
+    }
+
+    # Delete screenshot files from disk
+    screenshots_deleted = 0
+    for screenshot in scan_job.screenshots:
+        try:
+            screenshot_path = Path(screenshot.file_path)
+            if screenshot_path.exists():
+                screenshot_path.unlink()
+                screenshots_deleted += 1
+        except Exception as e:
+            print(f"Error deleting screenshot file {screenshot.file_path}: {e}")
+
+    # Delete job directory if it exists
+    job_dir = Path(settings.jobs_directory) / job_id
+    if job_dir.exists():
+        try:
+            shutil.rmtree(job_dir)
+        except Exception as e:
+            print(f"Error deleting job directory {job_dir}: {e}")
+
+    # Delete scan job (cascade will delete all related records)
+    db.delete(scan_job)
+    db.commit()
+
+    return DeleteScanResponse(
+        job_id=job_id,
+        message=f"Scan job force deleted successfully. {'Task revoked. ' if task_revoked else ''}Removed {screenshots_deleted} screenshot files from disk.",
+        deleted_items=deleted_items
+    )
