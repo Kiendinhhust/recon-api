@@ -258,19 +258,25 @@ class ReconPipeline:
             max_dns_queries = self.amass_config.get("max_dns_queries", 40)
             cmd.extend(["-max-dns-queries", str(max_dns_queries)])
 
-            # Add config file for deep scan
-            config_file = Path("config/deep_scan.yaml")
+            # Add config file for deep scan (use absolute path)
+            # Get project root directory (3 levels up from this file: app/services/pipeline.py -> app/services -> app -> root)
+            project_root = Path(__file__).parent.parent.parent
+            config_file = project_root / "config" / "deep_scan.yaml"
             if config_file.exists():
-                cmd.extend(["-config", str(config_file)])
+                cmd.extend(["-config", str(config_file.resolve())])
+                logger.info(f"[{self.job_id}] Using Amass config file: {config_file.resolve()}")
+            else:
+                logger.warning(f"[{self.job_id}] Amass config file not found: {config_file.resolve()}")
 
-            # Add wordlist if enabled
+            # Add wordlist if enabled (use absolute path)
             use_wordlist = self.amass_config.get("use_wordlist", False)
             if use_wordlist:
-                wordlist_file = Path("wordlists/httparchive_subdomains_2025_10_27.txt")
+                wordlist_file = project_root / "wordlists" / "httparchive_subdomains_2025_10_27.txt"
                 if wordlist_file.exists():
-                    cmd.extend(["-w", str(wordlist_file)])
+                    cmd.extend(["-w", str(wordlist_file.resolve())])
+                    logger.info(f"[{self.job_id}] Using Amass wordlist: {wordlist_file.resolve()}")
                 else:
-                    logger.warning(f"[{self.job_id}] Wordlist file not found: {wordlist_file}")
+                    logger.warning(f"[{self.job_id}] Wordlist file not found: {wordlist_file.resolve()}")
 
         # Add output file
         cmd.extend(["-o", "amass_raw.txt"])
