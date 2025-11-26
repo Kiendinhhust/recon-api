@@ -511,13 +511,40 @@ async function submitNewScan() {
         return;
     }
 
+    // Get Amass configuration values
+    const amassMode = document.getElementById('amassMode').value;
+    const amassTimeout = parseInt(document.getElementById('amassTimeout').value);
+    const amassMaxDnsQueries = parseInt(document.getElementById('amassMaxDnsQueries').value);
+    const amassUseWordlist = document.getElementById('amassUseWordlist').checked;
+
+    // Validate Amass configuration
+    if (amassTimeout < 5 || amassTimeout > 3600) {
+        errorEl.textContent = 'Timeout must be between 5 and 3600 minutes';
+        errorEl.classList.add('show');
+        return;
+    }
+
+    if (amassMaxDnsQueries < 1 || amassMaxDnsQueries > 200) {
+        errorEl.textContent = 'Max DNS queries must be between 1 and 200';
+        errorEl.classList.add('show');
+        return;
+    }
+
     try {
+        const scanData = {
+            domain: domain,
+            amass_mode: amassMode,
+            amass_timeout: amassTimeout,
+            amass_max_dns_queries: amassMaxDnsQueries,
+            amass_use_wordlist: amassUseWordlist
+        };
+
         const response = await fetch(`${API_BASE_URL}/scans`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ domain: domain })
+            body: JSON.stringify(scanData)
         });
 
         if (!response.ok) {

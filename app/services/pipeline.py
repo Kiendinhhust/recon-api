@@ -21,12 +21,20 @@ logger = logging.getLogger(__name__)
 class ReconPipeline:
     """Main reconnaissance pipeline with enhanced CLI tool integration"""
 
-    def __init__(self, job_id: str, domain: str, progress_callback: Optional[Callable] = None):
+    def __init__(self, job_id: str, domain: str, progress_callback: Optional[Callable] = None, amass_config: dict = None):
         self.job_id = job_id
         self.domain = domain
         self.job_dir = Path(settings.jobs_directory) / job_id
         self.shots_dir = self.job_dir / "shots"
         self.progress_callback = progress_callback
+
+        # Amass configuration
+        self.amass_config = amass_config or {
+            "mode": "passive",
+            "timeout": 30,
+            "max_dns_queries": 40,
+            "use_wordlist": False
+        }
 
         # Create job directories
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -149,8 +157,9 @@ class ReconPipeline:
         except Exception as e:
             logger.error(f"[{self.job_id}] Subfinder error: {e}")
 
-        # Step 2: Run amass (passive mode)
-        self._update_progress(25, "Running amass...")
+        # Step 2: Run amass with configured mode
+        amass_mode = self.amass_config.get("mode", "passive")
+        self._update_progress(25, f"Running amass ({amass_mode} mode)...")
         try:
             await self._run_amass_cli()
             logger.info(f"[{self.job_id}] Amass completed")
@@ -221,18 +230,53 @@ class ReconPipeline:
         await self._run_command_with_logging(cmd, "subfinder")
 
     async def _run_amass_cli(self):
-        """Run amass in passive mode with file output and filter only FQDNs"""
+        """Run amass with configurable mode, timeout, and options"""
         # Run amass and save raw output
         amass_raw_file = self.job_dir / "amass_raw.txt"
 
+        # Build base command
         cmd = [
             settings.amass_path,
             "enum",
-            "-passive",
-            "-timeout", "10",
             "-d", self.domain,
-            "-o", "amass_raw.txt"  # Just filename since cwd is job_dir
         ]
+
+        # Add mode flag (passive or active)
+        mode = self.amass_config.get("mode", "passive")
+        if mode == "active":
+            cmd.append("-active")
+        else:
+            cmd.append("-passive")
+
+        # Add timeout (in minutes)
+        timeout = self.amass_config.get("timeout", 30)
+        cmd.extend(["-timeout", str(timeout)])
+
+        # Add active mode specific options
+        if mode == "active":
+            # Add max DNS queries
+            max_dns_queries = self.amass_config.get("max_dns_queries", 40)
+            cmd.extend(["-max-dns-queries", str(max_dns_queries)])
+
+            # Add config file for deep scan
+            config_file = Path("config/deep_scan.yaml")
+            if config_file.exists():
+                cmd.extend(["-config", str(config_file)])
+
+            # Add wordlist if enabled
+            use_wordlist = self.amass_config.get("use_wordlist", False)
+            if use_wordlist:
+                wordlist_file = Path("wordlists/httparchive_subdomains_2025_10_27.txt")
+                if wordlist_file.exists():
+                    cmd.extend(["-w", str(wordlist_file)])
+                else:
+                    logger.warning(f"[{self.job_id}] Wordlist file not found: {wordlist_file}")
+
+        # Add output file
+        cmd.extend(["-o", "amass_raw.txt"])
+
+        logger.info(f"[{self.job_id}] Running Amass with config: mode={mode}, timeout={timeout}min, max_dns_queries={self.amass_config.get('max_dns_queries', 40)}, use_wordlist={self.amass_config.get('use_wordlist', False)}")
+
         await self._run_command_with_logging(cmd, "amass")
 
         # Filter and extract only FQDNs from amass output

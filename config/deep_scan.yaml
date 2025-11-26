@@ -1,0 +1,26 @@
+# --- AMASS DEEP SCAN CONFIGURATION (OPTIMIZED) ---
+
+# [1] RATE LIMITING (Prevent blocking)
+max_dns_queries: 40
+
+# [2] BRUTE-FORCE STRATEGY
+bruteforce:
+  enabled: true
+  recursive: true
+  minimum_for_recursive: 0
+
+# [3] ALTERATIONS (Generate variations)
+alterations:
+  enabled: true
+  edit_distance: 1
+  flip_numbers: true
+  add_words: true
+  add_numbers: true
+
+# [4] DNS RESOLVERS (Public DNS servers)
+resolvers:
+  - "1.1.1.1"   # Cloudflare
+  - "8.8.8.8"   # Google
+  - "9.9.9.9"   # Quad9
+  - "64.6.64.6" # Verisign
+

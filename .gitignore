@@ -70,3 +70,5 @@ htmlcov/
 *.temp
 *.bak
 
+# Wordlists (too large for Git)
+wordlists/*.txt

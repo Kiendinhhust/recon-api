@@ -15,11 +15,30 @@ from app.storage.models import ScanJob, ScanStatus, SubdomainStatus
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def run_recon_scan(self, job_id: str, domain: str) -> Dict[str, Any]:
+def run_recon_scan(self, job_id: str, domain: str, amass_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Enhanced main task to run reconnaissance scan with retry logic
+
+    Args:
+        job_id: Unique job identifier
+        domain: Target domain to scan
+        amass_config: Amass configuration dictionary with keys:
+            - mode: "passive" or "active"
+            - timeout: timeout in minutes (5-3600)
+            - max_dns_queries: max concurrent DNS queries (1-200)
+            - use_wordlist: whether to use custom wordlist (True/False)
     """
     db = SessionLocal()
+
+    # Set default Amass configuration if not provided
+    if amass_config is None:
+        amass_config = {
+            "mode": "passive",
+            "timeout": 30,
+            "max_dns_queries": 40,
+            "use_wordlist": False
+        }
+
     try:
         # Update job status to running
         scan_repo = ScanJobRepository(db)
@@ -41,8 +60,8 @@ def run_recon_scan(self, job_id: str, domain: str) -> Dict[str, Any]:
         # Update initial progress
         progress_callback(0, 'Initializing reconnaissance pipeline...')
 
-        # Run the enhanced pipeline
-        pipeline = ReconPipeline(job_id, domain, progress_callback)
+        # Run the enhanced pipeline with Amass configuration
+        pipeline = ReconPipeline(job_id, domain, progress_callback, amass_config=amass_config)
 
         # Use asyncio to run the async pipeline
         loop = asyncio.new_event_loop()

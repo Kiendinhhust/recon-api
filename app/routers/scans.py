@@ -20,6 +20,11 @@ router = APIRouter()
 # Pydantic models for request/response
 class ScanRequest(BaseModel):
     domain: str = Field(..., description="Target domain to scan", example="example.com")
+    # Amass configuration parameters
+    amass_mode: Optional[str] = Field(default="passive", description="Amass enumeration mode: 'passive' or 'active'", example="passive")
+    amass_timeout: Optional[int] = Field(default=30, ge=5, le=3600, description="Amass timeout in minutes (5-3600)", example=30)
+    amass_max_dns_queries: Optional[int] = Field(default=40, ge=1, le=200, description="Maximum concurrent DNS queries (1-200)", example=40)
+    amass_use_wordlist: Optional[bool] = Field(default=False, description="Use custom wordlist for brute-force enumeration", example=False)
 
 
 class ScanResponse(BaseModel):
@@ -150,8 +155,16 @@ async def create_scan(
     scan_repo = ScanJobRepository(db)
     scan_job = scan_repo.create_scan_job(job_id, domain)
 
-    # Start background task
-    task = run_recon_scan.delay(job_id, domain)
+    # Prepare Amass configuration
+    amass_config = {
+        "mode": scan_request.amass_mode or "passive",
+        "timeout": scan_request.amass_timeout or 30,
+        "max_dns_queries": scan_request.amass_max_dns_queries or 40,
+        "use_wordlist": scan_request.amass_use_wordlist or False
+    }
+
+    # Start background task with Amass configuration
+    task = run_recon_scan.delay(job_id, domain, amass_config)
 
     # Store task_id in database for progress tracking
     scan_repo.update_task_id(job_id, task.id)
@@ -192,8 +205,16 @@ async def create_bulk_scans(
         # Create scan job in database
         scan_job = scan_repo.create_scan_job(job_id, domain)
 
-        # Start background task
-        task = run_recon_scan.delay(job_id, domain)
+        # Use default Amass configuration for bulk scans
+        amass_config = {
+            "mode": "passive",
+            "timeout": 30,
+            "max_dns_queries": 40,
+            "use_wordlist": False
+        }
+
+        # Start background task with default Amass configuration
+        task = run_recon_scan.delay(job_id, domain, amass_config)
 
         # Store task_id in database
         scan_repo.update_task_id(job_id, task.id)

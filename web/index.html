@@ -324,6 +324,39 @@
             <div class="modal-body">
                 <label for="newScanDomain">Domain:</label>
                 <input type="text" id="newScanDomain" placeholder="example.com" class="modal-input">
+
+                <!-- Amass Configuration Section -->
+                <div class="amass-config-section">
+                    <h4>⚙️ Amass Configuration</h4>
+
+                    <div class="form-group">
+                        <label for="amassMode">Mode:</label>
+                        <select id="amassMode" class="modal-input">
+                            <option value="passive" selected>Passive (Safe, OSINT only)</option>
+                            <option value="active">Active (Deep scan with brute-force)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="amassTimeout">Timeout (minutes):</label>
+                        <input type="number" id="amassTimeout" class="modal-input"
+                               value="30" min="5" max="3600" placeholder="30">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="amassMaxDnsQueries">Max DNS Queries:</label>
+                        <input type="number" id="amassMaxDnsQueries" class="modal-input"
+                               value="40" min="1" max="200" placeholder="40">
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="amassUseWordlist">
+                            Use Custom Wordlist (httparchive_subdomains)
+                        </label>
+                    </div>
+                </div>
+
                 <div id="newScanError" class="error-message"></div>
             </div>
             <div class="modal-footer">
