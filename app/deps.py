@@ -2,10 +2,12 @@
 Dependencies and configuration for the recon API
 """
 import os
-from typing import Generator
+import json
+from typing import Generator, List, Union
 
 from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -27,7 +29,8 @@ class Settings(BaseSettings):
     api_description: str = "Subdomain reconnaissance and screenshot capture API"
     
     # CORS settings - Allow all localhost ports for development
-    cors_origins: list[str] = [
+    # Updated to handle parsing from environment variable string
+    cors_origins: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
         "http://localhost:8080",
@@ -68,6 +71,31 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore extra fields in .env
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        """
+        Tự động chuyển đổi chuỗi từ biến môi trường thành List.
+        Hỗ trợ cả dạng JSON string '["url"]' và dạng phẩy 'url1,url2'
+        """
+        if isinstance(v, list):
+            return v
+        
+        if isinstance(v, str):
+            # Nếu là chuỗi bắt đầu bằng [, thử parse JSON
+            if v.strip().startswith("["):
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    pass # Nếu lỗi JSON thì thử cách dưới
+            
+            # Nếu không phải JSON, tách theo dấu phẩy
+            return [i.strip() for i in v.split(",") if i.strip()]
+            
+        return v
+    # -----------------------------------
 
 
 # Global settings instance
