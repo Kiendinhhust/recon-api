@@ -84,9 +84,19 @@ async function loadScans() {
                     <button class="btn btn-small btn-success" onclick="event.stopPropagation(); exportResults('${scan.job_id}', '${scan.domain}')">
                         <span class="btn-icon">💾</span> Export
                     </button>
-                    ${scan.status === 'running' ? `
-                        <button class="btn btn-small btn-secondary" onclick="event.stopPropagation(); startProgressMonitoring('${scan.job_id}')">
-                            <span class="btn-icon">📊</span> Monitor
+                    ${scan.status === 'running' || scan.status === 'pending' ? `
+                        <button class="btn btn-small btn-warning" onclick="event.stopPropagation(); stopScan('${scan.job_id}')">
+                            <span class="btn-icon">⏸</span> Stop
+                        </button>
+                    ` : ''}
+                    ${scan.status === 'completed' || scan.status === 'failed' || scan.status === 'cancelled' ? `
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); deleteScan('${scan.job_id}', '${scan.domain}')">
+                            <span class="btn-icon">🗑</span> Delete
+                        </button>
+                    ` : ''}
+                    ${scan.status === 'running' || scan.status === 'pending' ? `
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); forceDeleteScan('${scan.job_id}', '${scan.domain}')">
+                            <span class="btn-icon">⚠</span> Force Delete
                         </button>
                     ` : ''}
                 </div>
@@ -594,36 +604,120 @@ async function submitBulkScan() {
 }
 
 // ========================================
-//   Delete Scan
+//   Job Management Functions
 // ========================================
 
-async function deleteScan(jobId, domain) {
-    if (!confirm(`Are you sure you want to delete scan for ${domain}?`)) {
+/**
+ * Stop a running scan
+ */
+async function stopScan(jobId) {
+    if (!confirm('Are you sure you want to stop this scan?\n\nPartial results will be preserved.')) {
         return;
     }
 
     try {
-        // Note: DELETE endpoint may not exist yet
-        // For now, just show a message
-        alert('Delete functionality will be implemented soon!');
-
-        // Uncomment when DELETE endpoint is ready:
-        /*
-        const response = await fetch(`${API_BASE_URL}/scans/${jobId}`, {
-            method: 'DELETE'
+        const response = await fetch(`${API_BASE_URL}/scans/${jobId}/stop`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const error = await response.json();
+            throw new Error(error.detail || `HTTP ${response.status}: ${response.statusText}`);
         }
 
+        const result = await response.json();
+        alert(`✅ ${result.message}`);
+
+        // Reload scans list
         loadScans();
-        alert(`✅ Scan deleted for ${domain}`);
-        */
+
+        // If scan details are open, reload them
+        if (document.getElementById('scan-details-section').style.display !== 'none') {
+            loadScanDetails(jobId);
+        }
+
+    } catch (error) {
+        console.error('Error stopping scan:', error);
+        alert(`❌ Error stopping scan: ${error.message}`);
+    }
+}
+
+/**
+ * Delete a completed/failed scan
+ */
+async function deleteScan(jobId, domain) {
+    if (!confirm(`Are you sure you want to delete scan for ${domain}?\n\nThis will permanently delete:\n- All subdomains\n- All screenshots\n- All WAF detections\n- All leak detections\n\nThis action cannot be undone!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/scans/${jobId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        alert(`✅ ${result.message}\n\nDeleted:\n- ${result.deleted_items.subdomains} subdomains\n- ${result.deleted_items.screenshots} screenshots\n- ${result.deleted_items.waf_detections} WAF detections\n- ${result.deleted_items.leak_detections} leak detections`);
+
+        // Reload scans list
+        loadScans();
+
+        // If scan details are open, close them
+        if (document.getElementById('scan-details-section').style.display !== 'none') {
+            document.getElementById('scan-details-section').style.display = 'none';
+        }
 
     } catch (error) {
         console.error('Error deleting scan:', error);
-        alert(`Error deleting scan: ${error.message}`);
+        alert(`❌ Error deleting scan: ${error.message}`);
+    }
+}
+
+/**
+ * Force delete a scan (stop + delete in one operation)
+ */
+async function forceDeleteScan(jobId, domain) {
+    if (!confirm(`⚠️ WARNING: FORCE DELETE\n\nAre you sure you want to FORCE DELETE scan for ${domain}?\n\nThis will:\n1. Forcefully terminate the running scan\n2. Permanently delete all data\n\nThis action cannot be undone!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/scans/${jobId}/force`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        alert(`✅ ${result.message}\n\nDeleted:\n- ${result.deleted_items.subdomains} subdomains\n- ${result.deleted_items.screenshots} screenshots\n- ${result.deleted_items.waf_detections} WAF detections\n- ${result.deleted_items.leak_detections} leak detections\n- Task revoked: ${result.deleted_items.task_revoked}`);
+
+        // Reload scans list
+        loadScans();
+
+        // If scan details are open, close them
+        if (document.getElementById('scan-details-section').style.display !== 'none') {
+            document.getElementById('scan-details-section').style.display = 'none';
+        }
+
+    } catch (error) {
+        console.error('Error force deleting scan:', error);
+        alert(`❌ Error force deleting scan: ${error.message}`);
     }
 }
 

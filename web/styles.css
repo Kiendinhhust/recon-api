@@ -183,6 +183,16 @@ body {
     box-shadow: var(--shadow-lg);
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+    color: white;
+}
+
+.btn-warning:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
 .btn-icon {
     font-size: 1.2rem;
 }
