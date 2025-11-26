@@ -602,13 +602,40 @@ async function submitBulkScan() {
         return;
     }
 
+    // Get Amass configuration values
+    const amassMode = document.getElementById('bulkAmassMode').value;
+    const amassTimeout = parseInt(document.getElementById('bulkAmassTimeout').value);
+    const amassMaxDnsQueries = parseInt(document.getElementById('bulkAmassMaxDnsQueries').value);
+    const amassUseWordlist = document.getElementById('bulkAmassUseWordlist').checked;
+
+    // Validate Amass configuration
+    if (amassTimeout < 5 || amassTimeout > 3600) {
+        errorEl.textContent = 'Timeout must be between 5 and 3600 minutes';
+        errorEl.classList.add('show');
+        return;
+    }
+
+    if (amassMaxDnsQueries < 1 || amassMaxDnsQueries > 200) {
+        errorEl.textContent = 'Max DNS queries must be between 1 and 200';
+        errorEl.classList.add('show');
+        return;
+    }
+
     try {
+        const bulkScanData = {
+            domains: domains,
+            amass_mode: amassMode,
+            amass_timeout: amassTimeout,
+            amass_max_dns_queries: amassMaxDnsQueries,
+            amass_use_wordlist: amassUseWordlist
+        };
+
         const response = await fetch(`${API_BASE_URL}/scans/bulk`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ domains: domains })
+            body: JSON.stringify(bulkScanData)
         });
 
         if (!response.ok) {

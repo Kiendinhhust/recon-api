@@ -36,6 +36,11 @@ class ScanResponse(BaseModel):
 
 class BulkScanRequest(BaseModel):
     domains: List[str] = Field(..., description="List of domains to scan", example=["example1.com", "example2.com", "example3.com"])
+    # Amass configuration parameters (same as ScanRequest)
+    amass_mode: Optional[str] = Field(default="passive", description="Amass enumeration mode: 'passive' or 'active'", example="passive")
+    amass_timeout: Optional[int] = Field(default=30, ge=5, le=3600, description="Amass timeout in minutes (5-3600)", example=30)
+    amass_max_dns_queries: Optional[int] = Field(default=40, ge=1, le=200, description="Maximum concurrent DNS queries (1-200)", example=40)
+    amass_use_wordlist: Optional[bool] = Field(default=False, description="Use custom wordlist for brute-force enumeration", example=False)
 
 
 class BulkScanResponse(BaseModel):
@@ -205,15 +210,15 @@ async def create_bulk_scans(
         # Create scan job in database
         scan_job = scan_repo.create_scan_job(job_id, domain)
 
-        # Use default Amass configuration for bulk scans
+        # Use Amass configuration from request (or defaults)
         amass_config = {
-            "mode": "passive",
-            "timeout": 30,
-            "max_dns_queries": 40,
-            "use_wordlist": False
+            "mode": bulk_request.amass_mode or "passive",
+            "timeout": bulk_request.amass_timeout or 30,
+            "max_dns_queries": bulk_request.amass_max_dns_queries or 40,
+            "use_wordlist": bulk_request.amass_use_wordlist or False
         }
 
-        # Start background task with default Amass configuration
+        # Start background task with Amass configuration
         task = run_recon_scan.delay(job_id, domain, amass_config)
 
         # Store task_id in database

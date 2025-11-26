@@ -378,6 +378,39 @@
             <div class="modal-body">
                 <label for="bulkScanDomains">Domains (one per line):</label>
                 <textarea id="bulkScanDomains" placeholder="example1.com&#10;example2.com&#10;example3.com" class="modal-textarea" rows="10"></textarea>
+
+                <!-- Amass Configuration Section -->
+                <div class="amass-config-section">
+                    <h4>⚙️ Amass Configuration (applies to all domains)</h4>
+
+                    <div class="form-group">
+                        <label for="bulkAmassMode">Mode:</label>
+                        <select id="bulkAmassMode" class="modal-input">
+                            <option value="passive" selected>Passive (Safe, OSINT only)</option>
+                            <option value="active">Active (Deep scan with brute-force)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bulkAmassTimeout">Timeout (minutes):</label>
+                        <input type="number" id="bulkAmassTimeout" class="modal-input"
+                               value="30" min="5" max="3600" placeholder="30">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bulkAmassMaxDnsQueries">Max DNS Queries:</label>
+                        <input type="number" id="bulkAmassMaxDnsQueries" class="modal-input"
+                               value="40" min="1" max="200" placeholder="40">
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="bulkAmassUseWordlist">
+                            Use Custom Wordlist (httparchive_subdomains)
+                        </label>
+                    </div>
+                </div>
+
                 <div id="bulkScanError" class="error-message"></div>
             </div>
             <div class="modal-footer">
