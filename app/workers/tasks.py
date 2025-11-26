@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.workers.celery_app import celery_app
 from app.deps import SessionLocal, settings
 from app.services.pipeline import ReconPipeline
-from app.storage.repo import ScanJobRepository, SubdomainRepository, ScreenshotRepository, WafDetectionRepository, LeakDetectionRepository
+from app.storage.repo import ScanJobRepository, SubdomainRepository, ScreenshotRepository, WafDetectionRepository, LeakDetectionRepository, TechnologyRepository
 from app.storage.models import ScanJob, ScanStatus, SubdomainStatus
 
 
@@ -71,8 +71,10 @@ def run_recon_scan(self, job_id: str, domain: str) -> Dict[str, Any]:
                     discovered_by="enhanced_pipeline"
                 )
 
-            # Update all hosts (both live and dead) with their status codes
+            # Update all hosts (both live and dead) with their status codes and httpx data
             if results.get('live_hosts'):
+                tech_repo = TechnologyRepository(db)
+
                 for live_host in results['live_hosts']:
                     # Extract domain from URL
                     url = live_host['url']
@@ -84,13 +86,32 @@ def run_recon_scan(self, job_id: str, domain: str) -> Dict[str, Any]:
                         if subdomain.subdomain == domain_part:
                             # Determine status based on is_live flag
                             status = SubdomainStatus.LIVE if live_host.get('is_live') else SubdomainStatus.DEAD
+
+                            # Update subdomain with all httpx fields
                             subdomain_repo.update_subdomain_status(
                                 subdomain.id,
                                 status,
                                 is_live=live_host.get('is_live', False),
                                 http_status=live_host.get('status_code'),
-                                response_time=live_host.get('response_time')
+                                response_time=live_host.get('response_time'),
+                                url=live_host.get('url'),
+                                title=live_host.get('title'),
+                                content_length=live_host.get('content_length'),
+                                webserver=live_host.get('webserver'),
+                                final_url=live_host.get('final_url'),
+                                cdn_name=live_host.get('cdn_name'),
+                                content_type=live_host.get('content_type'),
+                                host=live_host.get('host'),
+                                chain_status_codes=live_host.get('chain_status_codes'),
+                                ipv4_addresses=live_host.get('ipv4_addresses'),
+                                ipv6_addresses=live_host.get('ipv6_addresses')
                             )
+
+                            # Save technologies to separate table
+                            technologies = live_host.get('technologies', [])
+                            if technologies:
+                                tech_repo.bulk_create_technologies(subdomain.id, technologies)
+
                             break
 
             # Save screenshots

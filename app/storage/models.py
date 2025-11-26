@@ -3,7 +3,7 @@ Database models for the recon API
 """
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, JSON, Index
 from sqlalchemy.orm import relationship
 
 from app.deps import Base
@@ -46,22 +46,46 @@ class ScanJob(Base):
 
 
 class Subdomain(Base):
-    """Subdomain model"""
+    """Subdomain model - optimized for httpx data"""
     __tablename__ = "subdomains"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    scan_job_id = Column(Integer, ForeignKey("scan_jobs.id"), nullable=False)
-    subdomain = Column(String, nullable=False)
-    status = Column(String, default=SubdomainStatus.FOUND)
-    is_live = Column(Boolean, default=False)
-    http_status = Column(Integer, nullable=True)
-    response_time = Column(Integer, nullable=True)  # in milliseconds
-    discovered_by = Column(String, nullable=True)  # tool that found it
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
+    scan_job_id = Column(Integer, ForeignKey("scan_jobs.id"), nullable=False, index=True)
+
+    # Core subdomain info
+    subdomain = Column(String(255), nullable=False, index=True)
+    url = Column(String(512), nullable=True)  # Full URL with protocol (from httpx)
+
+    # Live status (from httpx)
+    status = Column(String, default=SubdomainStatus.FOUND)  # Keep for backward compatibility
+    is_live = Column(Boolean, default=False, index=True)
+    http_status = Column(Integer, nullable=True, index=True)
+
+    # Httpx data - Essential fields
+    title = Column(String(512), nullable=True)  # Page title
+    content_length = Column(Integer, nullable=True)  # Response size in bytes
+    webserver = Column(String(128), nullable=True)  # e.g., "cloudflare", "nginx"
+    final_url = Column(String(512), nullable=True)  # URL after redirects
+
+    # Httpx data - Useful fields
+    response_time = Column(String(32), nullable=True)  # e.g., "11.4100539s" (keep as string from httpx)
+    cdn_name = Column(String(128), nullable=True)  # e.g., "cloudflare"
+    content_type = Column(String(128), nullable=True)  # e.g., "text/html"
+    host = Column(String(64), nullable=True)  # Primary IP address
+
+    # Httpx data - Arrays (stored as JSON)
+    chain_status_codes = Column(JSON, nullable=True)  # e.g., [301, 200]
+    ipv4_addresses = Column(JSON, nullable=True)  # e.g., ["104.20.28.61", "172.66.170.120"]
+    ipv6_addresses = Column(JSON, nullable=True)  # e.g., ["2606:4700:10::ac42:aa78"]
+
+    # Metadata
+    discovered_by = Column(String(64), nullable=True)  # subfinder/amass/assetfinder
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
     # Relationships
     scan_job = relationship("ScanJob", back_populates="subdomains")
     screenshots = relationship("Screenshot", back_populates="subdomain", cascade="all, delete-orphan")
+    technologies = relationship("Technology", back_populates="subdomain", cascade="all, delete-orphan")
 
 
 class Screenshot(Base):
@@ -114,3 +138,21 @@ class LeakDetection(Base):
 
     # Relationships
     scan_job = relationship("ScanJob", back_populates="leak_detections")
+
+
+class Technology(Base):
+    """Technology detected on subdomain (from httpx tech-detect)"""
+    __tablename__ = "technologies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subdomain_id = Column(Integer, ForeignKey("subdomains.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False, index=True)  # e.g., "WordPress", "Bootstrap:4"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    subdomain = relationship("Subdomain", back_populates="technologies")
+
+    # Unique constraint: one technology per subdomain
+    __table_args__ = (
+        Index('idx_tech_subdomain', 'subdomain_id', 'name', unique=True),
+    )

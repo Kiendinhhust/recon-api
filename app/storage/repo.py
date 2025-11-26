@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.storage.models import ScanJob, Subdomain, Screenshot, ScanStatus, SubdomainStatus, WafDetection, LeakDetection
+from app.storage.models import ScanJob, Subdomain, Screenshot, ScanStatus, SubdomainStatus, WafDetection, LeakDetection, Technology
 
 
 class ScanJobRepository:
@@ -87,18 +87,48 @@ class SubdomainRepository:
         self.db.commit()
         return subdomain_objs
     
-    def update_subdomain_status(self, subdomain_id: int, status: SubdomainStatus, 
-                              is_live: bool = False, http_status: int = None, 
-                              response_time: int = None) -> Optional[Subdomain]:
-        """Update subdomain status and live check results"""
+    def update_subdomain_status(self, subdomain_id: int, status: SubdomainStatus,
+                              is_live: bool = False, http_status: int = None,
+                              response_time: str = None, url: str = None,
+                              title: str = None, content_length: int = None,
+                              webserver: str = None, final_url: str = None,
+                              cdn_name: str = None, content_type: str = None,
+                              host: str = None, chain_status_codes: list = None,
+                              ipv4_addresses: list = None, ipv6_addresses: list = None) -> Optional[Subdomain]:
+        """Update subdomain status and all httpx fields"""
         subdomain = self.db.query(Subdomain).filter(Subdomain.id == subdomain_id).first()
         if subdomain:
             subdomain.status = status
             subdomain.is_live = is_live
-            if http_status:
+
+            # Update all httpx fields if provided
+            if http_status is not None:
                 subdomain.http_status = http_status
-            if response_time:
+            if response_time is not None:
                 subdomain.response_time = response_time
+            if url is not None:
+                subdomain.url = url
+            if title is not None:
+                subdomain.title = title
+            if content_length is not None:
+                subdomain.content_length = content_length
+            if webserver is not None:
+                subdomain.webserver = webserver
+            if final_url is not None:
+                subdomain.final_url = final_url
+            if cdn_name is not None:
+                subdomain.cdn_name = cdn_name
+            if content_type is not None:
+                subdomain.content_type = content_type
+            if host is not None:
+                subdomain.host = host
+            if chain_status_codes is not None:
+                subdomain.chain_status_codes = chain_status_codes
+            if ipv4_addresses is not None:
+                subdomain.ipv4_addresses = ipv4_addresses
+            if ipv6_addresses is not None:
+                subdomain.ipv6_addresses = ipv6_addresses
+
             self.db.commit()
             self.db.refresh(subdomain)
         return subdomain
@@ -203,3 +233,52 @@ class LeakDetectionRepository:
     def get_by_job(self, job_id: str) -> List[LeakDetection]:
         """Get all leak detections for a scan job"""
         return self.db.query(LeakDetection).join(ScanJob).filter(ScanJob.job_id == job_id).all()
+
+
+class TechnologyRepository:
+    """Repository for technology operations"""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create_technology(self, subdomain_id: int, name: str) -> Technology:
+        """Create a technology record for a subdomain"""
+        # Check if technology already exists for this subdomain
+        existing = self.db.query(Technology).filter(
+            Technology.subdomain_id == subdomain_id,
+            Technology.name == name
+        ).first()
+
+        if existing:
+            return existing
+
+        tech = Technology(subdomain_id=subdomain_id, name=name)
+        self.db.add(tech)
+        self.db.commit()
+        self.db.refresh(tech)
+        return tech
+
+    def bulk_create_technologies(self, subdomain_id: int, tech_names: List[str]) -> List[Technology]:
+        """Create multiple technology records for a subdomain"""
+        tech_objs = []
+
+        for name in tech_names:
+            # Check if technology already exists
+            existing = self.db.query(Technology).filter(
+                Technology.subdomain_id == subdomain_id,
+                Technology.name == name
+            ).first()
+
+            if not existing:
+                tech_obj = Technology(subdomain_id=subdomain_id, name=name)
+                tech_objs.append(tech_obj)
+
+        if tech_objs:
+            self.db.add_all(tech_objs)
+            self.db.commit()
+
+        return tech_objs
+
+    def get_by_subdomain(self, subdomain_id: int) -> List[Technology]:
+        """Get all technologies for a subdomain"""
+        return self.db.query(Technology).filter(Technology.subdomain_id == subdomain_id).all()

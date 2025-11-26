@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recon API - Subdomain Scanner Dashboard</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <!-- Header -->
@@ -142,13 +142,17 @@
                                 <th>Subdomain</th>
                                 <th>Status</th>
                                 <th>HTTP Code</th>
+                                <th>Title</th>
+                                <th>Webserver</th>
+                                <th>CDN</th>
+                                <th>Technologies</th>
                                 <th>Response Time</th>
-                                <th>Discovered By</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="subdomains-tbody">
                             <tr>
-                                <td colspan="5" class="loading">Loading subdomains...</td>
+                                <td colspan="9" class="loading">Loading subdomains...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -352,7 +356,92 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Subdomain Details Modal -->
+    <div id="subdomainDetailsModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>🔍 Subdomain Details</h2>
+                <button class="modal-close" onclick="closeSubdomainDetailsModal()">✖</button>
+            </div>
+            <div class="modal-body">
+                <div class="details-grid">
+                    <div class="detail-row">
+                        <span class="detail-label">Subdomain:</span>
+                        <span class="detail-value" id="modal-subdomain">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">URL:</span>
+                        <span class="detail-value"><a id="modal-url" href="#" target="_blank" rel="noopener">-</a></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Status:</span>
+                        <span class="detail-value" id="modal-status">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">HTTP Status:</span>
+                        <span class="detail-value" id="modal-http-status">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Title:</span>
+                        <span class="detail-value" id="modal-title">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Webserver:</span>
+                        <span class="detail-value" id="modal-webserver">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">CDN:</span>
+                        <span class="detail-value" id="modal-cdn">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Content Type:</span>
+                        <span class="detail-value" id="modal-content-type">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Content Length:</span>
+                        <span class="detail-value" id="modal-content-length">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Response Time:</span>
+                        <span class="detail-value" id="modal-response-time">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Primary IP:</span>
+                        <span class="detail-value" id="modal-host">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Final URL:</span>
+                        <span class="detail-value"><a id="modal-final-url" href="#" target="_blank" rel="noopener">-</a></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IPv4 Addresses:</span>
+                        <span class="detail-value" id="modal-ipv4">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IPv6 Addresses:</span>
+                        <span class="detail-value" id="modal-ipv6">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Redirect Chain:</span>
+                        <span class="detail-value" id="modal-chain">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Technologies:</span>
+                        <span class="detail-value" id="modal-technologies">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Discovered By:</span>
+                        <span class="detail-value" id="modal-discovered-by">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeSubdomainDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=3"></script>
 </body>
 </html>
 

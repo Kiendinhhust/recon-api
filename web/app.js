@@ -156,25 +156,154 @@ async function loadScanDetails(jobId) {
 
 function displaySubdomains(subdomains) {
     const tbody = document.getElementById('subdomains-tbody');
-    
+
     if (subdomains.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="loading">No subdomains found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No subdomains found</td></tr>';
         return;
     }
-    
-    tbody.innerHTML = subdomains.map(sub => `
-        <tr class="subdomain-row" data-status="${sub.is_live ? 'live' : 'dead'}">
-            <td>${sub.subdomain}</td>
-            <td>
-                <span class="status-badge status-${sub.is_live ? 'live' : 'dead'}">
-                    ${sub.is_live ? '✓ Live' : '✗ Dead'}
-                </span>
-            </td>
-            <td>${sub.http_status || '-'}</td>
-            <td>${sub.response_time ? sub.response_time + 'ms' : '-'}</td>
-            <td>${sub.discovered_by || '-'}</td>
-        </tr>
-    `).join('');
+
+    // Debug: Log first subdomain to console
+    if (subdomains.length > 0) {
+        console.log('First subdomain data:', subdomains[0]);
+        console.log('Webserver:', subdomains[0].webserver);
+        console.log('Technologies:', subdomains[0].technologies);
+    }
+
+    tbody.innerHTML = subdomains.map(sub => {
+        // Format technologies
+        const techDisplay = sub.technologies && sub.technologies.length > 0
+            ? sub.technologies.slice(0, 2).map(t => t.name).join(', ') + (sub.technologies.length > 2 ? '...' : '')
+            : '-';
+
+        // Format response time
+        const responseTime = sub.response_time || '-';
+
+        return `
+            <tr class="subdomain-row" data-status="${sub.is_live ? 'live' : 'dead'}">
+                <td>${sub.url ? `<a href="${sub.url}" target="_blank" rel="noopener">${sub.subdomain}</a>` : sub.subdomain}</td>
+                <td>
+                    <span class="status-badge status-${sub.is_live ? 'live' : 'dead'}">
+                        ${sub.is_live ? '✓ Live' : '✗ Dead'}
+                    </span>
+                </td>
+                <td>${sub.http_status || '-'}</td>
+                <td title="${sub.title || ''}">${sub.title ? (sub.title.length > 30 ? sub.title.substring(0, 30) + '...' : sub.title) : '-'}</td>
+                <td>${sub.webserver || '-'}</td>
+                <td>${sub.cdn_name || '-'}</td>
+                <td title="${techDisplay}">${techDisplay}</td>
+                <td>${responseTime}</td>
+                <td>
+                    <button class="btn btn-small btn-primary" onclick="showSubdomainDetails(${sub.id})">
+                        <span class="btn-icon">👁</span> Details
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// ========================================
+//   Show Subdomain Details Modal
+// ========================================
+
+function showSubdomainDetails(subdomainId) {
+    const subdomain = currentScanData.subdomains.find(s => s.id === subdomainId);
+    if (!subdomain) {
+        alert('Subdomain not found!');
+        return;
+    }
+
+    // Populate modal fields
+    document.getElementById('modal-subdomain').textContent = subdomain.subdomain || '-';
+
+    // URL
+    const urlEl = document.getElementById('modal-url');
+    if (subdomain.url) {
+        urlEl.href = subdomain.url;
+        urlEl.textContent = subdomain.url;
+    } else {
+        urlEl.href = '#';
+        urlEl.textContent = '-';
+    }
+
+    // Status
+    const statusHtml = `<span class="status-badge status-${subdomain.is_live ? 'live' : 'dead'}">
+        ${subdomain.is_live ? '✓ Live' : '✗ Dead'}
+    </span>`;
+    document.getElementById('modal-status').innerHTML = statusHtml;
+
+    // HTTP Status
+    document.getElementById('modal-http-status').textContent = subdomain.http_status || '-';
+
+    // Title
+    document.getElementById('modal-title').textContent = subdomain.title || '-';
+
+    // Webserver
+    document.getElementById('modal-webserver').textContent = subdomain.webserver || '-';
+
+    // CDN
+    document.getElementById('modal-cdn').textContent = subdomain.cdn_name || '-';
+
+    // Content Type
+    document.getElementById('modal-content-type').textContent = subdomain.content_type || '-';
+
+    // Content Length
+    const contentLength = subdomain.content_length
+        ? `${(subdomain.content_length / 1024).toFixed(2)} KB (${subdomain.content_length} bytes)`
+        : '-';
+    document.getElementById('modal-content-length').textContent = contentLength;
+
+    // Response Time
+    document.getElementById('modal-response-time').textContent = subdomain.response_time || '-';
+
+    // Primary IP (host)
+    document.getElementById('modal-host').textContent = subdomain.host || '-';
+
+    // Final URL
+    const finalUrlEl = document.getElementById('modal-final-url');
+    if (subdomain.final_url) {
+        finalUrlEl.href = subdomain.final_url;
+        finalUrlEl.textContent = subdomain.final_url;
+    } else {
+        finalUrlEl.href = '#';
+        finalUrlEl.textContent = '-';
+    }
+
+    // IPv4 Addresses
+    const ipv4Html = subdomain.ipv4_addresses && subdomain.ipv4_addresses.length > 0
+        ? subdomain.ipv4_addresses.map(ip => `<span class="ip-badge">${ip}</span>`).join(' ')
+        : '-';
+    document.getElementById('modal-ipv4').innerHTML = ipv4Html;
+
+    // IPv6 Addresses
+    const ipv6Html = subdomain.ipv6_addresses && subdomain.ipv6_addresses.length > 0
+        ? subdomain.ipv6_addresses.map(ip => `<span class="ip-badge">${ip}</span>`).join(' ')
+        : '-';
+    document.getElementById('modal-ipv6').innerHTML = ipv6Html;
+
+    // Redirect Chain (chain_status_codes)
+    const chainHtml = subdomain.chain_status_codes && subdomain.chain_status_codes.length > 0
+        ? subdomain.chain_status_codes.map((code, idx) =>
+            `<span class="chain-badge">${code}</span>${idx < subdomain.chain_status_codes.length - 1 ? '<span class="chain-arrow">→</span>' : ''}`
+          ).join('')
+        : '-';
+    document.getElementById('modal-chain').innerHTML = chainHtml;
+
+    // Technologies
+    const techHtml = subdomain.technologies && subdomain.technologies.length > 0
+        ? subdomain.technologies.map(t => `<span class="tech-badge">${t.name}</span>`).join(' ')
+        : '-';
+    document.getElementById('modal-technologies').innerHTML = techHtml;
+
+    // Discovered By
+    document.getElementById('modal-discovered-by').textContent = subdomain.discovered_by || '-';
+
+    // Show modal
+    document.getElementById('subdomainDetailsModal').classList.add('show');
+}
+
+function closeSubdomainDetailsModal() {
+    document.getElementById('subdomainDetailsModal').classList.remove('show');
 }
 
 // ========================================

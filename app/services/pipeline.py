@@ -172,18 +172,10 @@ class ReconPipeline:
         return subdomains
     
     async def check_live_hosts_enhanced(self, subdomains: List[str]) -> List[Dict[str, Any]]:
-        """Enhanced live host detection with httprobe + httpx"""
+        """Enhanced live host detection with httpx (httprobe removed for optimization)"""
 
-        # Step 1: Quick live check with httprobe (optional, faster initial filter)
-        self._update_progress(55, "Running httprobe for quick live check...")
-        try:
-            await self._run_httprobe_cli()
-            logger.info(f"[{self.job_id}] Httprobe completed")
-        except Exception as e:
-            logger.warning(f"[{self.job_id}] Httprobe error (continuing with httpx): {e}")
-
-        # Step 2: Detailed analysis with httpx
-        self._update_progress(65, "Running httpx for detailed analysis...")
+        # Run httpx for comprehensive live host analysis
+        self._update_progress(55, "Running httpx for live host detection and analysis...")
         try:
             await self._run_httpx_cli()
             logger.info(f"[{self.job_id}] Httpx completed")
@@ -191,7 +183,7 @@ class ReconPipeline:
             logger.error(f"[{self.job_id}] Httpx error: {e}")
             return []
 
-        # Step 3: Parse results
+        # Parse httpx JSON results
         live_hosts = await self._parse_live_results()
         self._update_progress(75, f"Found {len(live_hosts)} live hosts")
 
@@ -341,30 +333,7 @@ class ReconPipeline:
             await self._merge_text_with_anew(result.stdout, self.subs_file)
             logger.info(f"[{self.job_id}] Assetfinder completed")
 
-    async def _run_httprobe_cli(self):
-        """Run httprobe for quick live check (Windows-safe)"""
-        if not self.subs_file.exists():
-            return
 
-        # Read subs and pipe to httprobe via stdin
-        import subprocess
-        with open(self.subs_file, 'r', encoding='utf-8', errors='ignore') as f:
-            subs_content = f.read()
-
-        result = subprocess.run(
-            [settings.httprobe_path],
-            input=subs_content,
-            capture_output=True,
-            text=True,
-            timeout=settings.httprobe_timeout,
-            encoding='utf-8',
-            errors='ignore'
-        )
-
-        if result.returncode == 0 and result.stdout:
-            with open(self.httprobe_file, 'w', encoding='utf-8') as f:
-                f.write(result.stdout)
-            logger.info(f"[{self.job_id}] Httprobe completed")
 
     async def _run_httpx_cli(self):
         """Run httpx for detailed live host analysis (Windows-safe)"""
@@ -666,7 +635,10 @@ class ReconPipeline:
                         if http_status == 404:
                             continue
 
-                        file_size = match.group(2)
+                        # Convert file_size to integer (database expects Integer type)
+                        file_size_str = match.group(2)
+                        file_size = int(file_size_str) if file_size_str.isdigit() else 0
+
                         response_time = match.group(3)
                         content_type = match.group(4)
                         url = match.group(5)
@@ -703,7 +675,7 @@ class ReconPipeline:
                             'leaked_file_url': url,
                             'file_type': content_type,
                             'severity': severity,
-                            'file_size': file_size,
+                            'file_size': file_size,  # Now an integer
                             'http_status': http_status
                         })
                     except Exception as e:
@@ -823,7 +795,7 @@ class ReconPipeline:
         return results
 
     async def _parse_live_results(self) -> List[Dict[str, Any]]:
-        """Parse httpx JSON output - includes both live and dead hosts with status codes"""
+        """Parse httpx JSON output - includes both live and dead hosts with all httpx fields"""
         if not self.live_file.exists():
             return []
 
@@ -832,7 +804,7 @@ class ReconPipeline:
         # 3xx: Redirects (server is responding)
         # 4xx: Client errors (server is responding)
         # 5xx: Server errors (server is responding - important for visibility!)
-        LIVE_STATUS_CODES = {200, 301, 302, 304, 307, 308, 400, 401, 403, 500, 501, 502, 503, 504}
+        LIVE_STATUS_CODES = {200, 201, 202, 204, 301, 302, 303, 304, 307, 308, 400, 401, 403, 404, 500, 501, 502, 503, 504}
 
         live_hosts = []
         with open(self.live_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -847,15 +819,30 @@ class ReconPipeline:
                     status_code = data.get('status_code')
                     is_live = status_code in LIVE_STATUS_CODES if status_code else False
 
+                    # Extract all httpx JSON fields
                     live_hosts.append({
+                        # Core fields
                         'url': data.get('url', ''),
                         'status_code': status_code,
                         'is_live': is_live,
-                        'response_time': data.get('response_time'),
+
+                        # Essential httpx fields
                         'title': data.get('title', '').strip() if data.get('title') else None,
-                        'tech': data.get('tech', []) if data.get('tech') else [],
                         'content_length': data.get('content_length'),
-                        'final_url': data.get('final_url')
+                        'webserver': data.get('webserver'),
+                        'final_url': data.get('final_url'),
+
+                        # Useful httpx fields
+                        'response_time': data.get('time'),  # httpx uses 'time' field (e.g., "11.4100539s")
+                        'cdn_name': data.get('cdn_name'),
+                        'content_type': data.get('content_type'),
+                        'host': data.get('host'),  # Primary IP address
+
+                        # Array fields
+                        'chain_status_codes': data.get('chain_status_codes', []),
+                        'ipv4_addresses': data.get('a', []),  # httpx uses 'a' for IPv4
+                        'ipv6_addresses': data.get('aaaa', []),  # httpx uses 'aaaa' for IPv6
+                        'technologies': data.get('tech', [])  # httpx uses 'tech' for technologies
                     })
                 except json.JSONDecodeError:
                     continue

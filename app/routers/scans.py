@@ -11,6 +11,8 @@ from app.deps import get_db
 from app.storage.repo import ScanJobRepository, SubdomainRepository, ScreenshotRepository, WafDetectionRepository, LeakDetectionRepository
 from app.storage.models import ScanStatus
 from app.workers.tasks import run_recon_scan
+from app.auth.dependencies import require_auth
+from app.auth.models import User
 
 router = APIRouter()
 
@@ -37,14 +39,43 @@ class BulkScanResponse(BaseModel):
     message: str
 
 
+class TechnologyInfo(BaseModel):
+    """Technology detected on subdomain"""
+    model_config = {"from_attributes": True}
+
+    id: int
+    name: str
+
+
 class SubdomainInfo(BaseModel):
+    """Subdomain information with httpx data"""
+    model_config = {"from_attributes": True}
+
     id: int
     subdomain: str
     status: str
     is_live: bool
     http_status: Optional[int] = None
-    response_time: Optional[int] = None
     discovered_by: Optional[str] = None
+
+    # Httpx data - Essential fields
+    url: Optional[str] = None
+    title: Optional[str] = None
+    content_length: Optional[int] = None
+    webserver: Optional[str] = None
+    final_url: Optional[str] = None
+
+    # Httpx data - Useful fields
+    response_time: Optional[str] = None  # Changed from int to str (e.g., "11.4100539s")
+    cdn_name: Optional[str] = None
+    content_type: Optional[str] = None
+    host: Optional[str] = None
+
+    # Httpx data - Arrays
+    chain_status_codes: Optional[List[int]] = None
+    ipv4_addresses: Optional[List[str]] = None
+    ipv6_addresses: Optional[List[str]] = None
+    technologies: Optional[List[TechnologyInfo]] = None
 
 
 class ScreenshotInfo(BaseModel):
@@ -98,10 +129,11 @@ class ScanListResponse(BaseModel):
 @router.post("/scans", response_model=ScanResponse)
 async def create_scan(
     scan_request: ScanRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
 ):
     """
-    Create a new reconnaissance scan job
+    Create a new reconnaissance scan job (requires authentication)
     """
     # Generate unique job ID
     job_id = str(uuid.uuid4())
@@ -135,7 +167,8 @@ async def create_scan(
 @router.post("/scans/bulk", response_model=BulkScanResponse)
 async def create_bulk_scans(
     bulk_request: BulkScanRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth)
 ):
     """
     Create multiple reconnaissance scan jobs at once
@@ -227,7 +260,23 @@ async def get_scan_result(
                 is_live=sub.is_live,
                 http_status=sub.http_status,
                 response_time=sub.response_time,
-                discovered_by=sub.discovered_by
+                discovered_by=sub.discovered_by,
+                # Httpx data - Essential fields
+                url=sub.url,
+                title=sub.title,
+                content_length=sub.content_length,
+                webserver=sub.webserver,
+                final_url=sub.final_url,
+                # Httpx data - Useful fields
+                cdn_name=sub.cdn_name,
+                content_type=sub.content_type,
+                host=sub.host,
+                # Httpx data - Arrays
+                chain_status_codes=sub.chain_status_codes,
+                ipv4_addresses=sub.ipv4_addresses,
+                ipv6_addresses=sub.ipv6_addresses,
+                # Technologies (relationship)
+                technologies=[TechnologyInfo(id=tech.id, name=tech.name) for tech in sub.technologies] if sub.technologies else []
             )
             for sub in subdomains
         ],

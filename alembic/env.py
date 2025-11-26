@@ -1,14 +1,25 @@
 from logging.config import fileConfig
 import os
+from pathlib import Path
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
 
+# Load .env file if it exists (for local development)
+from dotenv import load_dotenv
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    print(f"✓ Loaded .env file from {env_path}")
+else:
+    print(f"⚠ WARNING: .env file not found at {env_path}")
+
 # Import your models here
 from app.deps import Base
-from app.storage.models import ScanJob, Subdomain, Screenshot, WafDetection, LeakDetection
+from app.storage.models import ScanJob, Subdomain, Screenshot, WafDetection, LeakDetection, Technology
+from app.auth.models import User
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -18,7 +29,20 @@ config = context.config
 # This ensures Alembic uses the same database credentials as the application
 database_url = os.getenv("DATABASE_URL")
 if database_url:
+    # Mask password for security when printing
+    if '@' in database_url:
+        parts = database_url.split('@')
+        user_pass = parts[0].split(':')
+        if len(user_pass) >= 3:  # postgresql://user:pass
+            masked_url = ':'.join(user_pass[:-1]) + ':***@' + parts[1]
+        else:
+            masked_url = database_url
+    else:
+        masked_url = database_url
+    print(f"✓ Using DATABASE_URL from environment: {masked_url}")
     config.set_main_option("sqlalchemy.url", database_url)
+else:
+    print("⚠ WARNING: DATABASE_URL not found in environment, using alembic.ini default")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

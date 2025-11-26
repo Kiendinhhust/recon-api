@@ -1,12 +1,15 @@
 """
 Main FastAPI application for Recon API
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import status
+from sqlalchemy.orm import Session
 
-from app.deps import settings, setup_cors, create_jobs_directory
-from app.routers import scans
+from app.deps import settings, setup_cors, create_jobs_directory, get_db
+from app.routers import scans, auth
+from app.auth.dependencies import get_current_user_optional
 
 
 def create_app() -> FastAPI:
@@ -25,120 +28,54 @@ def create_app() -> FastAPI:
     
     # Create necessary directories
     create_jobs_directory()
-    
+
     # Include routers
+    app.include_router(auth.router, tags=["authentication"])
     app.include_router(scans.router, prefix="/api/v1", tags=["scans"])
-    
-    # Serve static files (screenshots and jobs)
+
+    # Serve static files (CSS, JavaScript, screenshots, and jobs)
+    # Mount web static files (CSS, JS) - must be before routes to avoid conflicts
+    from pathlib import Path
+    web_dir = Path("web")
+    if web_dir.exists():
+        app.mount("/static", StaticFiles(directory="web"), name="static")
+
+    # Serve jobs directory (screenshots and scan results)
     app.mount("/jobs", StaticFiles(directory="jobs"), name="jobs")
 
-    # Serve web UI
-    app.mount("/dashboard", StaticFiles(directory="web", html=True), name="web")
-
-    # Simple frontend (redirect to dashboard)
+    # Root route - redirect to login
     @app.get("/", response_class=HTMLResponse)
-    async def read_root():
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Recon API</title>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; }
-                .container { max-width: 800px; margin: 0 auto; }
-                .card { border: 1px solid #ddd; padding: 20px; margin: 20px 0; border-radius: 8px; }
-                .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-                .btn:hover { background: #0056b3; }
-                input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-                .results { margin-top: 20px; }
-                .subdomain { padding: 5px; margin: 2px 0; background: #f8f9fa; border-radius: 4px; }
-                .screenshot { max-width: 200px; margin: 10px; border: 1px solid #ddd; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>Recon API - Subdomain Scanner</h1>
-                
-                <div class="card">
-                    <h2>Start New Scan</h2>
-                    <input type="text" id="domain" placeholder="Enter domain (e.g., example.com)">
-                    <button class="btn" onclick="startScan()">Start Scan</button>
-                </div>
-                
-                <div class="card">
-                    <h2>Check Scan Status</h2>
-                    <input type="text" id="jobId" placeholder="Enter job ID">
-                    <button class="btn" onclick="checkStatus()">Check Status</button>
-                </div>
-                
-                <div id="results" class="results"></div>
-            </div>
-            
-            <script>
-                async function startScan() {
-                    const domain = document.getElementById('domain').value;
-                    if (!domain) {
-                        alert('Please enter a domain');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch('/api/v1/scans', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ domain: domain })
-                        });
-                        const data = await response.json();
-                        document.getElementById('results').innerHTML = 
-                            `<div class="card"><h3>Scan Started</h3><p>Job ID: ${data.job_id}</p><p>Status: ${data.status}</p></div>`;
-                    } catch (error) {
-                        document.getElementById('results').innerHTML = 
-                            `<div class="card"><h3>Error</h3><p>${error.message}</p></div>`;
-                    }
-                }
-                
-                async function checkStatus() {
-                    const jobId = document.getElementById('jobId').value;
-                    if (!jobId) {
-                        alert('Please enter a job ID');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/v1/scans/${jobId}`);
-                        const data = await response.json();
-                        
-                        let html = `<div class="card"><h3>Scan Results</h3>`;
-                        html += `<p><strong>Status:</strong> ${data.status}</p>`;
-                        html += `<p><strong>Domain:</strong> ${data.domain}</p>`;
-                        
-                        if (data.subdomains && data.subdomains.length > 0) {
-                            html += `<h4>Found Subdomains (${data.subdomains.length}):</h4>`;
-                            data.subdomains.forEach(sub => {
-                                html += `<div class="subdomain">${sub.subdomain} - ${sub.status}</div>`;
-                            });
-                        }
-                        
-                        if (data.screenshots && data.screenshots.length > 0) {
-                            html += `<h4>Screenshots:</h4>`;
-                            data.screenshots.forEach(shot => {
-                                html += `<img src="/static/${data.job_id}/shots/${shot.filename}" class="screenshot" alt="${shot.url}">`;
-                            });
-                        }
-                        
-                        html += `</div>`;
-                        document.getElementById('results').innerHTML = html;
-                    } catch (error) {
-                        document.getElementById('results').innerHTML = 
-                            `<div class="card"><h3>Error</h3><p>${error.message}</p></div>`;
-                    }
-                }
-            </script>
-        </body>
-        </html>
+    async def read_root(request: Request, db: Session = Depends(get_db)):
         """
+        Root route - redirect to dashboard if authenticated, otherwise to login
+        """
+        user = await get_current_user_optional(request, db)
+        if user:
+            return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+        else:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Protected dashboard route
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard_redirect(request: Request, db: Session = Depends(get_db)):
+        """
+        Dashboard route - require authentication
+        """
+        user = await get_current_user_optional(request, db)
+        if not user:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+        # Serve the dashboard HTML with user info
+        from pathlib import Path
+        dashboard_html = (Path("web") / "index.html").read_text(encoding="utf-8")
+
+        # Inject user info and logout button into dashboard
+        dashboard_html = dashboard_html.replace(
+            '<h1 class="logo">🔍 Recon WEB-KD</h1>',
+            f'<h1 class="logo">🔍 Recon WEB-KD</h1><p style="color: white; margin-top: 10px;">Welcome, {user.username}! <a href="/logout" style="color: white; text-decoration: underline;">Logout</a></p>'
+        )
+
+        return HTMLResponse(content=dashboard_html)
     
     return app
 

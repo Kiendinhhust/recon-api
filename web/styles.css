@@ -1057,3 +1057,88 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Subdomain Details Modal */
+.modal-large {
+    max-width: 900px;
+}
+
+.details-grid {
+    display: grid;
+    gap: var(--spacing-md);
+}
+
+.detail-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.detail-value {
+    color: var(--color-text);
+    word-break: break-word;
+}
+
+.detail-value a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.detail-value a:hover {
+    text-decoration: underline;
+}
+
+/* Technology badges */
+.tech-badge {
+    display: inline-block;
+    background: var(--gradient-primary);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* IP address list */
+.ip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.ip-badge {
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+}
+
+/* Status code chain */
+.chain-badge {
+    display: inline-block;
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    margin-right: 0.25rem;
+}
+
+.chain-arrow {
+    color: var(--color-text-muted);
+    margin: 0 0.25rem;
+}
