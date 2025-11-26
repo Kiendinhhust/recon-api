@@ -54,7 +54,7 @@ class Subdomain(Base):
 
     # Core subdomain info
     subdomain = Column(String(255), nullable=False, index=True)
-    url = Column(String(512), nullable=True)  # Full URL with protocol (from httpx)
+    url = Column(Text, nullable=True)  # Full URL with protocol (from httpx) - TEXT to handle long OAuth URLs
 
     # Live status (from httpx)
     status = Column(String, default=SubdomainStatus.FOUND)  # Keep for backward compatibility
@@ -62,10 +62,10 @@ class Subdomain(Base):
     http_status = Column(Integer, nullable=True, index=True)
 
     # Httpx data - Essential fields
-    title = Column(String(512), nullable=True)  # Page title
+    title = Column(String(1024), nullable=True)  # Page title - increased to 1024 for long titles
     content_length = Column(Integer, nullable=True)  # Response size in bytes
     webserver = Column(String(128), nullable=True)  # e.g., "cloudflare", "nginx"
-    final_url = Column(String(512), nullable=True)  # URL after redirects
+    final_url = Column(Text, nullable=True)  # URL after redirects - TEXT to handle long OAuth/SSO URLs
 
     # Httpx data - Useful fields
     response_time = Column(String(32), nullable=True)  # e.g., "11.4100539s" (keep as string from httpx)
