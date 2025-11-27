@@ -249,8 +249,8 @@ class ReconPipeline:
             cmd.append("-passive")
 
         # Add timeout (in minutes)
-        timeout = self.amass_config.get("timeout", 30)
-        cmd.extend(["-timeout", str(timeout)])
+        amass_timeout_minutes = self.amass_config.get("timeout", 30)
+        cmd.extend(["-timeout", str(amass_timeout_minutes)])
 
         # Add active mode specific options
         if mode == "active":
@@ -281,17 +281,38 @@ class ReconPipeline:
         # Add output file
         cmd.extend(["-o", "amass_raw.txt"])
 
-        logger.info(f"[{self.job_id}] Running Amass with config: mode={mode}, timeout={timeout}min, max_dns_queries={self.amass_config.get('max_dns_queries', 40)}, use_wordlist={self.amass_config.get('use_wordlist', False)}")
+        logger.info(f"[{self.job_id}] Running Amass with config: mode={mode}, timeout={amass_timeout_minutes}min, max_dns_queries={self.amass_config.get('max_dns_queries', 40)}, use_wordlist={self.amass_config.get('use_wordlist', False)}")
 
-        await self._run_command_with_logging(cmd, "amass")
+        # Calculate subprocess timeout: Amass timeout + 5 minute buffer to allow graceful completion
+        subprocess_timeout_seconds = (amass_timeout_minutes * 60) + 300
+
+        try:
+            await self._run_command_with_logging(cmd, "amass", timeout=subprocess_timeout_seconds)
+        except Exception as e:
+            # Check if this is a timeout error
+            if "timed out" in str(e).lower():
+                logger.warning(f"[{self.job_id}] Amass timed out, checking for partial results...")
+
+                # Check if we have partial results
+                if amass_raw_file.exists() and amass_raw_file.stat().st_size > 0:
+                    logger.info(f"[{self.job_id}] Found partial Amass results ({amass_raw_file.stat().st_size} bytes), continuing with available data")
+                else:
+                    logger.warning(f"[{self.job_id}] Amass timed out with no results, skipping Amass enumeration")
+                    return  # Skip Amass results but don't fail the entire scan
+            else:
+                # For non-timeout errors, log but don't fail the entire scan
+                logger.error(f"[{self.job_id}] Amass error: {str(e)}, continuing without Amass results")
+                return
 
         # Filter and extract only FQDNs from amass output
-        if amass_raw_file.exists():
+        if amass_raw_file.exists() and amass_raw_file.stat().st_size > 0:
             await self._filter_amass_output(amass_raw_file)
 
             # Merge filtered amass results with main subs file using anew (Windows-safe)
             if self.amass_file.exists():
                 await self._merge_files_with_anew(self.amass_file, self.subs_file)
+        else:
+            logger.warning(f"[{self.job_id}] No Amass results to process")
 
     async def _merge_files_with_anew(self, source_file: Path, target_file: Path):
         """Merge source file into target file using anew (Windows-safe)"""
@@ -1068,8 +1089,8 @@ class ReconPipeline:
             return result.stdout
 
         except subprocess.TimeoutExpired:
-            logger.error(f"[{self.job_id}] {tool_name} timed out after {timeout} seconds")
-            raise Exception(f"{tool_name} timed out")
+            logger.warning(f"[{self.job_id}] {tool_name} timed out after {timeout} seconds ({timeout/60:.1f} minutes)")
+            raise Exception(f"{tool_name} timed out after {timeout} seconds")
         except FileNotFoundError as e:
             logger.error(f"[{self.job_id}] {tool_name} executable not found: {str(e)}")
             raise Exception(f"{tool_name} not found: {str(e)}")
