@@ -121,23 +121,6 @@
         .success-message:not(:empty) {
             display: block;
         }
-
-        .register-link {
-            text-align: center;
-            margin-top: 20px;
-            color: #666;
-            font-size: 14px;
-        }
-
-        .register-link a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-        }
-
-        .register-link a:hover {
-            text-decoration: underline;
-        }
     </style>
 </head>
 <body>
@@ -163,19 +146,7 @@
 
             <button type="submit" class="btn">Login</button>
         </form>
-
-        <div class="register-link">
-            Don't have an account? <a href="/register">Register here</a>
-        </div>
     </div>
-
-    <script>
-        // Check if user just registered
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('registered') === 'true') {
-            document.getElementById('success-message').textContent = 'Registration successful! Please login.';
-        }
-    </script>
 </body>
 </html>
 

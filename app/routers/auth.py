@@ -24,17 +24,9 @@ router = APIRouter()
 # Load HTML templates
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 LOGIN_HTML = (TEMPLATES_DIR / "login.html").read_text(encoding="utf-8")
-REGISTER_HTML = (TEMPLATES_DIR / "register.html").read_text(encoding="utf-8")
 
 
 # Pydantic models for request/response
-class UserRegister(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-    full_name: Optional[str] = None
-
-
 class UserLogin(BaseModel):
     username: str
     password: str
@@ -57,48 +49,6 @@ class UserResponse(BaseModel):
 # ============================================================================
 # API ENDPOINTS (JSON)
 # ============================================================================
-
-@router.post("/api/v1/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_api(user_data: UserRegister, db: Session = Depends(get_db)):
-    """
-    Register a new user (API endpoint)
-    
-    Returns user data on success
-    """
-    # Check if username already exists
-    existing_user = db.query(User).filter(User.username == user_data.username).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
-        )
-    
-    # Check if email already exists
-    existing_email = db.query(User).filter(User.email == user_data.email).first()
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Create user
-    user = create_user(
-        db=db,
-        username=user_data.username,
-        email=user_data.email,
-        password=user_data.password,
-        full_name=user_data.full_name
-    )
-    
-    return UserResponse(
-        id=user.id,
-        username=user.username,
-        email=user.email,
-        full_name=user.full_name,
-        is_active=user.is_active,
-        is_admin=user.is_admin
-    )
-
 
 @router.post("/api/v1/auth/login", response_model=Token)
 async def login_api(user_data: UserLogin, db: Session = Depends(get_db)):
@@ -207,97 +157,6 @@ async def login_form(
     )
 
     return redirect_response
-
-
-@router.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, db: Session = Depends(get_db)):
-    """
-    Serve registration page
-
-    If user is already authenticated, redirect to dashboard
-    """
-    user = await get_current_user_optional(request, db)
-    if user:
-        return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-
-    return HTMLResponse(content=REGISTER_HTML)
-
-
-@router.post("/register")
-async def register_form(
-    response: Response,
-    username: str = Form(...),
-    email: str = Form(...),
-    password: str = Form(...),
-    full_name: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
-):
-    """
-    Handle registration form submission
-
-    Creates user and redirects to login page
-    """
-    # Validate input
-    if len(username) < 3:
-        return HTMLResponse(
-            content=REGISTER_HTML.replace(
-                '<div id="error-message" class="error-message"></div>',
-                '<div id="error-message" class="error-message">Username must be at least 3 characters</div>'
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-
-    if len(password) < 6:
-        return HTMLResponse(
-            content=REGISTER_HTML.replace(
-                '<div id="error-message" class="error-message"></div>',
-                '<div id="error-message" class="error-message">Password must be at least 6 characters</div>'
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-
-    # Check if username already exists
-    existing_user = db.query(User).filter(User.username == username).first()
-    if existing_user:
-        return HTMLResponse(
-            content=REGISTER_HTML.replace(
-                '<div id="error-message" class="error-message"></div>',
-                '<div id="error-message" class="error-message">Username already registered</div>'
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-
-    # Check if email already exists
-    existing_email = db.query(User).filter(User.email == email).first()
-    if existing_email:
-        return HTMLResponse(
-            content=REGISTER_HTML.replace(
-                '<div id="error-message" class="error-message"></div>',
-                '<div id="error-message" class="error-message">Email already registered</div>'
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
-
-    # Create user
-    try:
-        user = create_user(
-            db=db,
-            username=username,
-            email=email,
-            password=password,
-            full_name=full_name
-        )
-    except Exception as e:
-        return HTMLResponse(
-            content=REGISTER_HTML.replace(
-                '<div id="error-message" class="error-message"></div>',
-                f'<div id="error-message" class="error-message">Registration failed: {str(e)}</div>'
-            ),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-    # Redirect to login page with success message
-    return RedirectResponse(url="/login?registered=true", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/logout")
