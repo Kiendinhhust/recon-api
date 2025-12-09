@@ -72,3 +72,7 @@ htmlcov/
 
 # Wordlists (too large for Git)
 wordlists/*.txt
+
+# Documentation files (keep in repo but don't deploy to VPS)
+# These are excluded from deployment via rsync in CI/CD
+# Note: We keep them in Git for documentation purposes

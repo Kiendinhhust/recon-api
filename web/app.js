@@ -14,18 +14,138 @@ let currentScanData = null;
 let progressInterval = null;
 let currentScansPage = 0;
 let scansPerPage = 100;
+let currentTab = 'overview'; // Track current active tab
+
+// ========================================
+//   Hash-based Router
+// ========================================
+
+class Router {
+    constructor() {
+        this.routes = [];
+        this.currentRoute = null;
+
+        // Listen for hash changes
+        window.addEventListener('hashchange', () => this.handleRoute());
+        window.addEventListener('load', () => this.handleRoute());
+    }
+
+    // Add a route
+    addRoute(pattern, handler) {
+        this.routes.push({ pattern, handler });
+    }
+
+    // Navigate to a route
+    navigate(path) {
+        window.location.hash = path;
+    }
+
+    // Handle route changes
+    handleRoute() {
+        const hash = window.location.hash.slice(1) || '/jobs'; // Default to /jobs
+
+        for (const route of this.routes) {
+            const match = this.matchRoute(hash, route.pattern);
+            if (match) {
+                this.currentRoute = { path: hash, params: match.params };
+                route.handler(match.params);
+                return;
+            }
+        }
+
+        // No match found - redirect to jobs list
+        this.navigate('/jobs');
+    }
+
+    // Match a hash against a route pattern
+    matchRoute(hash, pattern) {
+        const hashParts = hash.split('/').filter(p => p);
+        const patternParts = pattern.split('/').filter(p => p);
+
+        if (hashParts.length !== patternParts.length) {
+            return null;
+        }
+
+        const params = {};
+
+        for (let i = 0; i < patternParts.length; i++) {
+            if (patternParts[i].startsWith(':')) {
+                // Dynamic parameter
+                const paramName = patternParts[i].slice(1);
+                params[paramName] = hashParts[i];
+            } else if (patternParts[i] !== hashParts[i]) {
+                // Static part doesn't match
+                return null;
+            }
+        }
+
+        return { params };
+    }
+}
+
+// Initialize router
+const router = new Router();
+
+// Define routes
+router.addRoute('/jobs', renderJobsList);
+router.addRoute('/jobs/:id', renderJobOverview);
+router.addRoute('/jobs/:id/httpx', renderHttpxTab);
+router.addRoute('/jobs/:id/waf', renderWafTab);
+router.addRoute('/jobs/:id/screenshots', renderScreenshotsTab);
+router.addRoute('/jobs/:id/leaks', renderLeaksTab);
+
+// ========================================
+//   Route Handlers
+// ========================================
+
+function renderJobsList(params) {
+    // Hide scan details section
+    document.getElementById('scan-details-section').style.display = 'none';
+    currentScanData = null;
+
+    // Show scans list
+    loadScans();
+
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderJobOverview(params) {
+    const jobId = params.id;
+    loadScanDetailsWithTab(jobId, 'overview');
+}
+
+function renderHttpxTab(params) {
+    const jobId = params.id;
+    loadScanDetailsWithTab(jobId, 'httpx');
+}
+
+function renderWafTab(params) {
+    const jobId = params.id;
+    loadScanDetailsWithTab(jobId, 'waf');
+}
+
+function renderScreenshotsTab(params) {
+    const jobId = params.id;
+    loadScanDetailsWithTab(jobId, 'screenshots');
+}
+
+function renderLeaksTab(params) {
+    const jobId = params.id;
+    loadScanDetailsWithTab(jobId, 'leaks');
+}
 
 // ========================================
 //   Initialize
 // ========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadScans();
-    
-    // Auto-refresh every 10 seconds
+    // Router will handle initial load
+
+    // Auto-refresh every 10 seconds (only on jobs list)
     setInterval(() => {
-        if (!document.getElementById('scan-details-section').style.display || 
-            document.getElementById('scan-details-section').style.display === 'none') {
+        const hash = window.location.hash.slice(1) || '/jobs';
+        if (hash === '/jobs') {
             loadScans();
         }
     }, 10000);
@@ -115,10 +235,19 @@ async function loadScans() {
 }
 
 // ========================================
-//   Load Scan Details
+//   Load Scan Details (Legacy - for backward compatibility)
 // ========================================
 
 async function loadScanDetails(jobId) {
+    // Redirect to router-based navigation
+    router.navigate(`/jobs/${jobId}`);
+}
+
+// ========================================
+//   Load Scan Details with Tab Support
+// ========================================
+
+async function loadScanDetailsWithTab(jobId, tab = 'overview') {
     const detailsSection = document.getElementById('scan-details-section');
     detailsSection.style.display = 'block';
 
@@ -126,37 +255,153 @@ async function loadScanDetails(jobId) {
     detailsSection.scrollIntoView({ behavior: 'smooth' });
 
     try {
-        const response = await fetch(`${API_BASE_URL}/scans/${jobId}`);
-        const scan = await response.json();
+        // Only fetch data if we don't have it or it's a different job
+        if (!currentScanData || currentScanData.job_id !== jobId) {
+            const response = await fetch(`${API_BASE_URL}/scans/${jobId}`);
+            const scan = await response.json();
+            currentScanData = scan;
 
-        currentScanData = scan;
+            // Update scan info header
+            document.getElementById('detail-domain').textContent = scan.domain;
+            document.getElementById('detail-status').innerHTML = `<span class="scan-status status-${scan.status}">${scan.status}</span>`;
+            document.getElementById('detail-subdomains-count').textContent = scan.subdomains.length;
+            document.getElementById('detail-screenshots-count').textContent = scan.screenshots.length;
+            document.getElementById('detail-created').textContent = formatDate(scan.created_at);
+            document.getElementById('detail-completed').textContent = scan.completed_at ? formatDate(scan.completed_at) : 'In progress...';
+        }
 
-        // Update scan info
-        document.getElementById('detail-domain').textContent = scan.domain;
-        document.getElementById('detail-status').innerHTML = `<span class="scan-status status-${scan.status}">${scan.status}</span>`;
-        document.getElementById('detail-subdomains-count').textContent = scan.subdomains.length;
-        document.getElementById('detail-screenshots-count').textContent = scan.screenshots.length;
-        document.getElementById('detail-created').textContent = formatDate(scan.created_at);
-        document.getElementById('detail-completed').textContent = scan.completed_at ? formatDate(scan.completed_at) : 'In progress...';
-
-        // Load subdomains
-        displaySubdomains(scan.subdomains);
-
-        // Load WAF detections
-        displayWafDetections(scan.waf_detections || []);
-
-        // Load leak detections
-        displayLeakDetections(scan.leak_detections || []);
-
-        // Load screenshots
-        displayScreenshots(scan.screenshots, jobId);
-
-        // Load selective scan URLs
-        loadSelectiveScanUrls(scan);
+        // Show the requested tab
+        showTab(tab);
 
     } catch (error) {
         console.error('Error loading scan details:', error);
         alert('Error loading scan details!');
+    }
+}
+
+// ========================================
+//   Show Tab (Lazy Loading)
+// ========================================
+
+function showTab(tabName) {
+    currentTab = tabName;
+
+    // Update URL if we have currentScanData
+    if (currentScanData) {
+        const jobId = currentScanData.job_id;
+        if (tabName === 'overview') {
+            router.navigate(`/jobs/${jobId}`);
+        } else {
+            router.navigate(`/jobs/${jobId}/${tabName}`);
+        }
+    }
+
+    // Update tab navigation active state
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeTabBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if (activeTabBtn) {
+        activeTabBtn.classList.add('active');
+    }
+
+    // Hide all tab content sections
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.style.display = 'none';
+    });
+
+    // Show the selected tab content
+    const tabContent = document.getElementById(`tab-${tabName}`);
+    if (tabContent) {
+        tabContent.style.display = 'block';
+    }
+
+    // Lazy load data for the tab (only if not already loaded)
+    if (!currentScanData) return;
+
+    switch(tabName) {
+        case 'overview':
+            loadOverviewTab();
+            break;
+        case 'httpx':
+            loadHttpxTab();
+            break;
+        case 'waf':
+            loadWafTab();
+            break;
+        case 'screenshots':
+            loadScreenshotsTab();
+            break;
+        case 'leaks':
+            loadLeaksTab();
+            break;
+    }
+}
+
+// ========================================
+//   Load Tab Content (Lazy Loading)
+// ========================================
+
+function loadOverviewTab() {
+    if (!currentScanData) return;
+
+    // Calculate statistics
+    const totalSubdomains = currentScanData.subdomains.length;
+    const liveHosts = currentScanData.subdomains.filter(s => s.is_live).length;
+    const screenshots = currentScanData.screenshots.length;
+    const wafProtected = (currentScanData.waf_detections || []).filter(w => w.has_waf).length;
+    const leakFindings = (currentScanData.leak_detections || []).length;
+    const highSeverityLeaks = (currentScanData.leak_detections || []).filter(l => l.severity === 'high').length;
+
+    // Update statistics
+    document.getElementById('overview-total-subdomains').textContent = totalSubdomains;
+    document.getElementById('overview-live-hosts').textContent = liveHosts;
+    document.getElementById('overview-screenshots').textContent = screenshots;
+    document.getElementById('overview-waf-protected').textContent = wafProtected;
+    document.getElementById('overview-leak-findings').textContent = leakFindings;
+    document.getElementById('overview-high-severity').textContent = highSeverityLeaks;
+}
+
+function loadHttpxTab() {
+    if (!currentScanData) return;
+
+    // Load subdomains table (only once)
+    const tbody = document.getElementById('subdomains-tbody');
+    if (tbody.querySelector('.loading') || tbody.children.length === 0) {
+        displaySubdomains(currentScanData.subdomains);
+    }
+
+    // Load selective scan URLs
+    loadSelectiveScanUrls(currentScanData);
+}
+
+function loadWafTab() {
+    if (!currentScanData) return;
+
+    // Load WAF detections (only once)
+    const tbody = document.getElementById('waf-tbody');
+    if (tbody.querySelector('.loading') || tbody.children.length === 0) {
+        displayWafDetections(currentScanData.waf_detections || []);
+    }
+}
+
+function loadScreenshotsTab() {
+    if (!currentScanData) return;
+
+    // Load screenshots (only once)
+    const gallery = document.getElementById('screenshots-gallery');
+    if (gallery.querySelector('.loading') || gallery.children.length === 0) {
+        displayScreenshots(currentScanData.screenshots, currentScanData.job_id);
+    }
+}
+
+function loadLeaksTab() {
+    if (!currentScanData) return;
+
+    // Load leak detections (only once)
+    const tbody = document.getElementById('leaks-tbody');
+    if (tbody.querySelector('.loading') || tbody.children.length === 0) {
+        displayLeakDetections(currentScanData.leak_detections || []);
     }
 }
 
@@ -439,15 +684,12 @@ function setFilter(filter) {
 }
 
 // ========================================
-//   Close Scan Details
+//   Close Scan Details (Legacy - for backward compatibility)
 // ========================================
 
 function closeScanDetails() {
-    document.getElementById('scan-details-section').style.display = 'none';
-    currentScanData = null;
-    
-    // Scroll back to top
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Redirect to router-based navigation
+    router.navigate('/jobs');
 }
 
 // ========================================
@@ -1104,7 +1346,9 @@ function showSelectiveScanResults(scanData) {
 // Reload scan details
 function reloadScanDetails() {
     if (currentJobId) {
-        loadScanDetails(currentJobId);
+        // Clear cached data to force reload
+        currentScanData = null;
+        loadScanDetailsWithTab(currentJobId, currentTab);
 
         // Reset selective scan UI
         document.getElementById('selective-scan-form').style.display = 'none';
